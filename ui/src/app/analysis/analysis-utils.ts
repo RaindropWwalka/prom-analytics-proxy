@@ -73,3 +73,57 @@ export function totals(rows: UnusedAnalysisRow[]) {
     { total: 0, unused: 0 },
   );
 }
+
+// AnalysisFilters narrows the analysis table: text filters match a
+// dimension's value case-insensitively, number filters keep rows at or
+// above them. Empty means no filter.
+export interface AnalysisFilters {
+  job: string;
+  service: string;
+  source: string;
+  minTotal: string;
+  minUnused: string;
+  minSeries: string;
+  minUnusedSeries: string;
+  minPct: string;
+}
+
+export const NO_FILTERS: AnalysisFilters = {
+  job: "",
+  service: "",
+  source: "",
+  minTotal: "",
+  minUnused: "",
+  minSeries: "",
+  minUnusedSeries: "",
+  minPct: "",
+};
+
+export function hasFilters(f: AnalysisFilters): boolean {
+  return Object.values(f).some((v) => v.trim() !== "");
+}
+
+export function filterRows<T extends UnusedAnalysisRow & { pct: number }>(
+  rows: T[],
+  f: AnalysisFilters,
+): T[] {
+  const text = (value: string | undefined, needle: string) =>
+    needle.trim() === "" ||
+    (value ?? "").toLowerCase().includes(needle.trim().toLowerCase());
+  const atLeast = (value: number, min: string) => {
+    if (min.trim() === "") return true;
+    const n = Number(min);
+    return Number.isNaN(n) || value >= n;
+  };
+  return rows.filter(
+    (r) =>
+      text(r.job, f.job) &&
+      text(r.service, f.service) &&
+      text(r.source, f.source) &&
+      atLeast(r.total, f.minTotal) &&
+      atLeast(r.unused, f.minUnused) &&
+      atLeast(r.series, f.minSeries) &&
+      atLeast(r.unusedSeries, f.minUnusedSeries) &&
+      atLeast(r.pct, f.minPct),
+  );
+}

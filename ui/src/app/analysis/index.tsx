@@ -22,6 +22,7 @@ import {
   type UnusedAnalysisRow,
 } from "@/api/metrics";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
@@ -42,10 +43,13 @@ import { formatUnit } from "@/lib/utils";
 import {
   catalogLink,
   DIMENSIONS,
+  filterRows,
+  hasFilters,
+  NO_FILTERS,
+  type AnalysisFilters,
   dimensionTitle,
   groupByOf,
   groupLabel,
-  groupTitle,
   type Dimension,
   totals,
   unusedPercent,
@@ -136,18 +140,25 @@ export default function AnalysisPage() {
       })),
     [data, shownGroupBy],
   );
+  const [filters, setFilters] = useState<AnalysisFilters>(NO_FILTERS);
+  const setFilter = (key: keyof AnalysisFilters, value: string) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  const shownDims = DIMENSIONS.filter((d) => shownGroupBy.includes(d));
+  // Table, chart and totals all follow the filters.
+  const filtered = useMemo(() => filterRows(rows, filters), [rows, filters]);
+
   const chartRows = useMemo(
     () =>
-      [...rows].sort((a, b) =>
+      [...filtered].sort((a, b) =>
         measure === "series"
           ? b.unusedSeries - a.unusedSeries
           : b.unused - a.unused,
       ),
-    [rows, measure],
+    [filtered, measure],
   );
   const hasSeries = rows.some((r) => r.series > 0);
-  const sum = totals(rows);
-  const seriesSum = rows.reduce(
+  const sum = totals(filtered);
+  const seriesSum = filtered.reduce(
     (acc, r) => ({
       series: acc.series + r.series,
       unused: acc.unused + r.unusedSeries,
@@ -156,21 +167,20 @@ export default function AnalysisPage() {
   );
 
   const columns: LegacyColumnDef<Row>[] = [
-    {
-      accessorKey: "label",
-      size: 320,
+    ...shownDims.map((d): LegacyColumnDef<Row> => ({
+      accessorKey: d,
       header: ({ column }) => (
-        <DataTableColumnHeader
-          column={column}
-          title={groupTitle(shownGroupBy)}
-        />
+        <DataTableColumnHeader column={column} title={dimensionTitle(d)} />
       ),
       cell: ({ row }) => (
-        <span className="block truncate font-medium" title={row.original.label}>
-          {row.original.label}
+        <span
+          className="block truncate font-medium"
+          title={row.original[d] || undefined}
+        >
+          {row.original[d] || "—"}
         </span>
       ),
-    },
+    })),
     {
       accessorKey: "total",
       size: 110,
@@ -405,14 +415,64 @@ export default function AnalysisPage() {
             </CardContent>
           </Card>
 
-          <DataTable<Row>
-            data={rows}
-            columns={columns}
-            pagination={true}
-            pageSize={20}
-            searchColumn="label"
-            onRowClick={(row) => setLocation(catalogLink(row))}
-          />
+          <Card>
+            <CardContent className="pt-6">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">
+                  {filtered.length === rows.length
+                    ? `${rows.length} groups`
+                    : `${filtered.length} of ${rows.length} groups`}
+                </span>
+                {hasFilters(filters) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setFilters(NO_FILTERS)}
+                    className="cursor-pointer"
+                  >
+                    Reset filters
+                  </Button>
+                )}
+              </div>
+              <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+                {shownDims.map((d) => (
+                  <Input
+                    key={d}
+                    aria-label={`Filter ${dimensionTitle(d)}`}
+                    placeholder={`${dimensionTitle(d)} contains…`}
+                    value={filters[d]}
+                    onChange={(e) => setFilter(d, e.target.value)}
+                  />
+                ))}
+                {(
+                  [
+                    ["minTotal", "Metrics ≥"],
+                    ["minUnused", "Unused ≥"],
+                    ["minSeries", "Series ≥"],
+                    ["minUnusedSeries", "Unused series ≥"],
+                    ["minPct", "Unused % ≥"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Input
+                    key={key}
+                    type="number"
+                    min={0}
+                    aria-label={label}
+                    placeholder={label}
+                    value={filters[key]}
+                    onChange={(e) => setFilter(key, e.target.value)}
+                  />
+                ))}
+              </div>
+              <DataTable<Row>
+                data={filtered}
+                columns={columns}
+                pagination={true}
+                pageSize={20}
+                onRowClick={(row) => setLocation(catalogLink(row))}
+              />
+            </CardContent>
+          </Card>
         </>
       )}
     </div>
