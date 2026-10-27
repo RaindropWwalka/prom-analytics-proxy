@@ -132,12 +132,20 @@ type InventoryConfig struct {
 	// while the Prometheus servers writing into it still can. Only the
 	// catalog step reads these; queries, the summary and the job index keep
 	// going through the upstream.
-	MetadataSources     []MetadataSourceConfig `yaml:"metadata_sources,omitempty"`
-	SyncInterval        time.Duration          `yaml:"sync_interval,omitempty"`
-	TimeWindow          time.Duration          `yaml:"time_window,omitempty"`
-	RunTimeout          time.Duration          `yaml:"run_timeout,omitempty"`
-	MetadataStepTimeout time.Duration          `yaml:"metadata_step_timeout,omitempty"`
-	SummaryStepTimeout  time.Duration          `yaml:"summary_step_timeout,omitempty"`
+	MetadataSources []MetadataSourceConfig `yaml:"metadata_sources,omitempty"`
+	// MetadataSourceWorkers caps how many metadata sources are read at
+	// once, so a long list doesn't land every response in memory together.
+	MetadataSourceWorkers int `yaml:"metadata_source_workers,omitempty"`
+	// MetadataSourceTimeout bounds one source's read, so a source that
+	// hangs gives up its worker instead of holding it until the whole step
+	// times out. Zero leaves each read bounded by MetadataStepTimeout alone.
+	// Defaults to a minute: a healthy Prometheus answers in seconds.
+	MetadataSourceTimeout time.Duration `yaml:"metadata_source_timeout,omitempty"`
+	SyncInterval          time.Duration `yaml:"sync_interval,omitempty"`
+	TimeWindow            time.Duration `yaml:"time_window,omitempty"`
+	RunTimeout            time.Duration `yaml:"run_timeout,omitempty"`
+	MetadataStepTimeout   time.Duration `yaml:"metadata_step_timeout,omitempty"`
+	SummaryStepTimeout    time.Duration `yaml:"summary_step_timeout,omitempty"`
 	// JobSyncEnabled controls whether the syncer fetches job metadata from
 	// Prometheus and populates job_index. Set to false when you want to avoid heavy job queries.
 	JobSyncEnabled bool `yaml:"job_sync_enabled,omitempty"`
@@ -240,6 +248,8 @@ var DefaultConfig = &Config{
 		Enabled:                 true,
 		MetadataSyncEnabled:     true,
 		MetadataMetricsNameOnly: false,
+		MetadataSourceWorkers:   4,
+		MetadataSourceTimeout:   time.Minute,
 		SyncInterval:            10 * time.Minute,
 		TimeWindow:              30 * 24 * time.Hour,
 		RunTimeout:              300 * time.Second,
@@ -504,7 +514,13 @@ func (c InventoryConfig) Validate() error {
 			errs = append(errs, fmt.Errorf("inventory.%s must be positive (got: %s)", f.name, f.value))
 		}
 	}
-	if c.MetadataSyncEnabled {
+	if c.MetadataSyncEnabled && len(c.MetadataSources) > 0 {
+		if c.MetadataSourceWorkers <= 0 {
+			errs = append(errs, fmt.Errorf("inventory.metadata_source_workers must be positive (got: %d)", c.MetadataSourceWorkers))
+		}
+		if c.MetadataSourceTimeout < 0 {
+			errs = append(errs, fmt.Errorf("inventory.metadata_source_timeout must not be negative (got: %s)", c.MetadataSourceTimeout))
+		}
 		for i, src := range c.MetadataSources {
 			if err := src.Validate(); err != nil {
 				errs = append(errs, fmt.Errorf("inventory.metadata_sources[%d]: %w", i, err))
@@ -699,6 +715,8 @@ func logInventoryConfig(cfg *Config) {
 		"Inventory.MetadataSyncEnabled", cfg.Inventory.MetadataSyncEnabled,
 		"Inventory.MetadataMetricsNameOnly", cfg.Inventory.MetadataMetricsNameOnly,
 		"Inventory.MetadataSources", len(cfg.Inventory.MetadataSources),
+		"Inventory.MetadataSourceWorkers", cfg.Inventory.MetadataSourceWorkers,
+		"Inventory.MetadataSourceTimeout", cfg.Inventory.MetadataSourceTimeout,
 		"Inventory.SyncInterval", cfg.Inventory.SyncInterval,
 		"Inventory.TimeWindow", cfg.Inventory.TimeWindow,
 		"Inventory.RunTimeout", cfg.Inventory.RunTimeout,

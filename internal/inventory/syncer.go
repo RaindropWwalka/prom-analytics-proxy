@@ -25,6 +25,8 @@ type Syncer struct {
 	// metadataSources are what the catalog step reads; when empty it reads
 	// promAPI, the upstream, like every other step (see catalogSources).
 	metadataSources         []metadataSource
+	metadataSourceWorkers   int
+	metadataSourceTimeout   time.Duration
 	timeWindow              time.Duration
 	metadataLim             string
 	metadataSyncEnabled     bool
@@ -200,6 +202,8 @@ func NewSyncer(dbp db.Provider, upstream string, cfg *config.Config, reg prometh
 		dbProvider:              dbp,
 		promAPI:                 v1.NewAPI(client),
 		metadataSources:         sources,
+		metadataSourceWorkers:   inv.MetadataSourceWorkers,
+		metadataSourceTimeout:   inv.MetadataSourceTimeout,
 		timeWindow:              inv.TimeWindow,
 		metadataLim:             lim,
 		metadataSyncEnabled:     inv.MetadataSyncEnabled,
@@ -359,30 +363,38 @@ func (s *Syncer) catalogSources() []metadataSource {
 	return []metadataSource{{name: "upstream", api: s.promAPI}}
 }
 
-// fetchCatalog queries every catalog source concurrently, all under the
-// one metadata step budget, and merges what came back.
+// fetchCatalog reads the catalog sources, at most metadataSourceWorkers at
+// a time and in config order, all under the one metadata step budget, and
+// merges what came back.
 func (s *Syncer) fetchCatalog(ctx context.Context, fetch func(context.Context, v1.API) ([]db.MetricCatalogItem, error)) ([]db.MetricCatalogItem, error) {
 	sources := s.catalogSources()
 	results := make([][]db.MetricCatalogItem, len(sources))
 	errs := make([]error, len(sources))
+
+	workers := s.metadataSourceWorkers
+	if workers <= 0 || workers > len(sources) {
+		workers = len(sources)
+	}
+	next := make(chan int)
 	var wg sync.WaitGroup
-	for i, src := range sources {
+	for range workers {
 		wg.Go(func() {
-			results[i], errs[i] = fetch(ctx, src.api)
+			for i := range next {
+				results[i], errs[i] = s.fetchSource(ctx, sources[i], fetch)
+			}
 		})
 	}
+	for i := range sources {
+		next <- i
+	}
+	close(next)
 	wg.Wait()
 
 	var failed []error
 	for i, err := range errs {
-		if err == nil {
-			continue
+		if err != nil {
+			failed = append(failed, fmt.Errorf("%s: %w", sources[i].name, err))
 		}
-		slog.Error("inventory: fetch catalog", "source", sources[i].name, "err", err)
-		if s.metadataSourceFailure != nil {
-			s.metadataSourceFailure.WithLabelValues(sources[i].name).Inc()
-		}
-		failed = append(failed, fmt.Errorf("%s: %w", sources[i].name, err))
 	}
 	if len(failed) == len(sources) {
 		return nil, errors.Join(failed...)
@@ -392,6 +404,36 @@ func (s *Syncer) fetchCatalog(ctx context.Context, fetch func(context.Context, v
 			"failed", len(failed), "sources", len(sources))
 	}
 	return mergeCatalogItems(results), nil
+}
+
+// fetchSource reads one source under its own timeout, when one is set, and
+// logs the outcome as soon as it has one: with tens of sources a step can
+// run for many minutes, and a failure reported only at its end is a failure
+// nobody sees in time.
+func (s *Syncer) fetchSource(ctx context.Context, src metadataSource, fetch func(context.Context, v1.API) ([]db.MetricCatalogItem, error)) ([]db.MetricCatalogItem, error) {
+	srcCtx := ctx
+	if s.metadataSourceTimeout > 0 {
+		var cancel context.CancelFunc
+		srcCtx, cancel = context.WithTimeout(ctx, s.metadataSourceTimeout)
+		defer cancel()
+	}
+	start := time.Now()
+	items, err := fetch(srcCtx, src.api)
+	took := time.Since(start).Round(time.Millisecond)
+	if err != nil {
+		// Its own deadline, not the step's: the step's would fail every
+		// source left, and say so itself.
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			err = fmt.Errorf("timed out after %s (metadata_source_timeout): %w", s.metadataSourceTimeout, err)
+		}
+		slog.Error("inventory: metadata source failed", "source", src.name, "took", took, "err", err)
+		if s.metadataSourceFailure != nil {
+			s.metadataSourceFailure.WithLabelValues(src.name).Inc()
+		}
+		return nil, err
+	}
+	slog.Info("inventory: metadata source read", "source", src.name, "metrics", len(items), "took", took)
+	return items, nil
 }
 
 // mergeCatalogItems keeps one item per metric name across sources. The

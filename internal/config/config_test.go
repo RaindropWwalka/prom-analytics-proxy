@@ -388,3 +388,19 @@ func TestInventoryConfig_ValidateChecksMetadataSources(t *testing.T) {
 	cfg.MetadataSyncEnabled = false
 	assert.NoError(t, cfg.Validate())
 }
+
+func TestInventoryConfig_ValidateChecksMetadataSourceWorkersAndTimeout(t *testing.T) {
+	cfg := DefaultConfig.Inventory
+	cfg.MetadataSources = []MetadataSourceConfig{{URL: "http://prometheus:9090"}}
+	require.NoError(t, cfg.Validate())
+
+	cfg.MetadataSourceWorkers = 0
+	cfg.MetadataSourceTimeout = -time.Second
+	err := cfg.Validate()
+	assert.ErrorContains(t, err, "inventory.metadata_source_workers must be positive")
+	assert.ErrorContains(t, err, "inventory.metadata_source_timeout must not be negative")
+
+	// Without sources neither value is read, so neither can fail validation.
+	cfg.MetadataSources = nil
+	assert.NoError(t, cfg.Validate())
+}

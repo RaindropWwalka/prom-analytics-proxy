@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/nicolastakashi/prom-analytics-proxy/internal/config"
@@ -141,4 +143,89 @@ func keys(m map[string]db.MetricCatalogItem) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// concurrencyAPI is a source that records how many reads of it, across
+// every source sharing it, were ever in flight at once.
+type concurrencyAPI struct {
+	v1.API
+
+	delay time.Duration
+
+	mu                    sync.Mutex
+	inFlight, maxInFlight int
+	calls                 int
+}
+
+func (c *concurrencyAPI) Metadata(ctx context.Context, _ string, _ string) (map[string][]v1.Metadata, error) {
+	c.mu.Lock()
+	c.calls++
+	c.inFlight++
+	c.maxInFlight = max(c.maxInFlight, c.inFlight)
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.inFlight--
+		c.mu.Unlock()
+	}()
+
+	select {
+	case <-time.After(c.delay):
+		return map[string][]v1.Metadata{"up": {{Type: "gauge"}}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestSyncer_MetadataSourceWorkersCapsConcurrentReads(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		shared := &concurrencyAPI{delay: time.Second}
+		sources := make([]metadataSource, 7)
+		for i := range sources {
+			sources[i] = metadataSource{name: string(rune('a' + i)), api: shared}
+		}
+		s := newSourcesSyncer(&fakeProvider{}, false, sources...)
+		s.metadataSourceWorkers = 3
+
+		start := time.Now()
+		_, err := s.fetchCatalog(context.Background(), s.fetchMetadataItems)
+		require.NoError(t, err)
+
+		assert.Equal(t, 7, shared.calls, "every source should still be read")
+		assert.Equal(t, 3, shared.maxInFlight)
+		assert.Equal(t, 3*time.Second, time.Since(start), "7 one-second reads, 3 at a time, take 3 rounds")
+	})
+}
+
+func TestSyncer_MetadataSourceTimeoutFreesAHungSource(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		provider := &fakeProvider{}
+		hung := &fakePromAPI{metadataDelay: time.Hour}
+		ok := &fakePromAPI{meta: map[string][]v1.Metadata{"up": {{Type: "gauge"}}}}
+		// One worker: without the per-source timeout the hung source would
+		// hold it until the step's own timeout, and "ok" would never be read.
+		s := newSourcesSyncer(provider, false, metadataSource{"hung", hung}, metadataSource{"ok", ok})
+		s.metadataSourceWorkers = 1
+		s.metadataSourceTimeout = 5 * time.Second
+
+		start := time.Now()
+		s.RunOnce(context.Background())
+
+		assert.Equal(t, 5*time.Second, time.Since(start))
+		assert.Equal(t, 1, provider.catalogCommits)
+		assert.ElementsMatch(t, []string{"up"}, keys(catalogByName(provider.catalogItems)))
+		assert.Equal(t, 1.0, testutil.ToFloat64(s.metadataSourceFailure.WithLabelValues("hung")))
+	})
+}
+
+func TestSyncer_SourceTimeoutIsNamedInTheError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := newSourcesSyncer(&fakeProvider{}, false)
+		s.metadataSourceTimeout = 5 * time.Second
+
+		_, err := s.fetchSource(context.Background(), metadataSource{"hung", &fakePromAPI{metadataDelay: time.Hour}}, s.fetchMetadataItems)
+
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.ErrorContains(t, err, "timed out after 5s (metadata_source_timeout)")
+	})
 }
