@@ -18,6 +18,9 @@ interface MetricsExplorerHeaderProps {
   producers?: string[];
   producerFilter?: string;
   onProducerFilterChange?: (value: string) => void;
+  sources?: string[];
+  sourceFilter?: string;
+  onSourceFilterChange?: (value: string) => void;
 }
 
 export function MetricsExplorerHeader({
@@ -30,6 +33,9 @@ export function MetricsExplorerHeader({
   producers = [],
   producerFilter = "",
   onProducerFilterChange,
+  sources = [],
+  sourceFilter = "",
+  onSourceFilterChange,
 }: MetricsExplorerHeaderProps) {
   const producerOptions = producers.filter((p) => !!p && p.trim().length > 0);
   const currentProducerValue = producerOptions.includes(producerFilter)
@@ -91,6 +97,37 @@ export function MetricsExplorerHeader({
             ))}
           </SelectContent>
         </Select>
+        {sources.length > 0 && (
+          <Select
+            value={sources.includes(sourceFilter) ? sourceFilter : "__all__"}
+            onValueChange={(v) =>
+              onSourceFilterChange?.(v === "__all__" ? "" : v)
+            }
+          >
+            <SelectTrigger
+              className="w-[220px] sm:w-[240px] text-left"
+              aria-label="Source"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <Filter className="h-4 w-4 shrink-0" />
+                <span
+                  className="truncate"
+                  title={sourceFilter || "All Sources"}
+                >
+                  <SelectValue placeholder="All Sources" />
+                </span>
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All Sources</SelectItem>
+              {sources.map((source) => (
+                <SelectItem key={source} value={source}>
+                  {source}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Select
           value={usageFilter}
           onValueChange={(v) =>
