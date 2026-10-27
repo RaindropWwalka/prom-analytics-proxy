@@ -15,6 +15,9 @@ import {
 import { Play } from "lucide-react";
 import {
   analyzeUnused,
+  getProducers,
+  getServices,
+  getSources,
   type UnusedAnalysisGroupBy,
   type UnusedAnalysisRow,
 } from "@/api/metrics";
@@ -47,6 +50,15 @@ import {
   totals,
   unusedPercent,
 } from "./analysis-utils";
+
+// Why a dimension has nothing to group by.
+const UNAVAILABLE: Record<Dimension, string> = {
+  job: "The job index isn't built yet: it fills in at the end of an inventory sync with inventory.job_sync_enabled.",
+  service:
+    "The service index isn't built yet: it fills in with the job index when inventory.service_label is set.",
+  source:
+    "No metadata source has reported metrics yet (inventory.metadata_sources).",
+};
 
 // How many groups the chart shows; the table has them all.
 const CHART_GROUPS = 15;
@@ -85,6 +97,26 @@ export default function AnalysisPage() {
     } else {
       setRequested(groupBy);
     }
+  };
+
+  // How many values each dimension has: 0 means its index isn't built
+  // (yet), so grouping by it can only come back empty.
+  const { data: jobs } = useQuery({
+    queryKey: ["producers"],
+    queryFn: getProducers,
+  });
+  const { data: services } = useQuery({
+    queryKey: ["services"],
+    queryFn: getServices,
+  });
+  const { data: sources } = useQuery({
+    queryKey: ["sources"],
+    queryFn: getSources,
+  });
+  const available: Record<Dimension, number | undefined> = {
+    job: jobs?.length,
+    service: services?.length,
+    source: sources?.length,
   };
 
   const toggle = (d: Dimension) =>
@@ -208,27 +240,41 @@ export default function AnalysisPage() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div
-          className="flex items-center gap-2"
-          role="group"
-          aria-label="Group by"
-        >
-          <span className="text-sm text-muted-foreground">Group by</span>
-          {DIMENSIONS.map((d) => (
-            <Button
-              key={d}
-              type="button"
-              size="sm"
-              variant={dims.includes(d) ? "default" : "outline"}
-              aria-pressed={dims.includes(d)}
-              onClick={() => toggle(d)}
-              className="cursor-pointer"
-            >
-              {dimensionTitle(d)}
-            </Button>
-          ))}
-        </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <fieldset className="rounded-md border px-3 pb-2 pt-1">
+          <legend className="px-1 text-xs text-muted-foreground">
+            Group rows by
+          </legend>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {DIMENSIONS.map((d) => {
+              const count = available[d];
+              const disabled = count === 0;
+              return (
+                <label
+                  key={d}
+                  className={`flex items-center gap-2 text-sm ${
+                    disabled
+                      ? "cursor-not-allowed text-muted-foreground"
+                      : "cursor-pointer"
+                  }`}
+                  title={disabled ? UNAVAILABLE[d] : undefined}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-primary"
+                    checked={dims.includes(d)}
+                    disabled={disabled}
+                    onChange={() => toggle(d)}
+                  />
+                  {dimensionTitle(d)}
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {count === undefined ? "…" : count}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
         <Button
           onClick={run}
           disabled={isFetching || !groupBy}
@@ -240,15 +286,29 @@ export default function AnalysisPage() {
         </Button>
       </div>
 
+      <p className="-mt-2 text-xs text-muted-foreground">
+        {groupBy
+          ? `One row per ${dims.length > 1 ? "combination of " : ""}${DIMENSIONS.filter(
+              (d) => dims.includes(d),
+            )
+              .map((d) => dimensionTitle(d).toLowerCase())
+              .join(" + ")}.`
+          : "Pick at least one dimension."}
+      </p>
+
       {error && (
         <p className="text-sm text-destructive">{(error as Error).message}</p>
       )}
 
       {data && rows.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          Nothing to analyze. Grouping by job or service needs the job index
-          (inventory.job_sync_enabled, with inventory.service_label for
-          services), and by source needs inventory.metadata_sources.
+          Nothing to analyze yet.{" "}
+          {DIMENSIONS.filter(
+            (d) => (requested ?? "").includes(d) && available[d] === 0,
+          )
+            .map((d) => UNAVAILABLE[d])
+            .join(" ") ||
+            "No metric has been synced within the inventory time window."}
         </p>
       )}
 
