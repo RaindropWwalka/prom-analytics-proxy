@@ -23,6 +23,58 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/analysis/unused": {
+            "get": {
+                "description": "Count the catalog's metrics and how many are unused, per job, per metadata source, or per job and source. Metrics not synced within the inventory time window are left out.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "metrics"
+                ],
+                "summary": "Unused metrics analysis",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "job (default), source, or job,source",
+                        "name": "groupBy",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep only this job",
+                        "name": "job",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep only this source",
+                        "name": "source",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/routes.UnusedAnalysisResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/configs": {
             "get": {
                 "description": "Get sanitized server configuration (secrets redacted) as YAML.",
@@ -1694,6 +1746,23 @@ const docTemplate = `{
                 }
             }
         },
+        "db.UnusedAnalysisRow": {
+            "type": "object",
+            "properties": {
+                "job": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "unused": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.Data": {
             "type": "object",
             "properties": {
@@ -2008,6 +2077,17 @@ const docTemplate = `{
                 },
                 "totalPages": {
                     "type": "integer"
+                }
+            }
+        },
+        "routes.UnusedAnalysisResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/db.UnusedAnalysisRow"
+                    }
                 }
             }
         },

@@ -682,3 +682,38 @@ func TestMetricMetadata(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/metricMetadata/missing", nil))
 	assert.Equal(t, 404, w.Code)
 }
+
+// analysisProvider records what the analysis was asked for.
+type analysisProvider struct {
+	db.Provider
+	got db.UnusedAnalysisParams
+}
+
+func (a *analysisProvider) AnalyzeUnusedMetrics(_ context.Context, params db.UnusedAnalysisParams) ([]db.UnusedAnalysisRow, error) {
+	a.got = params
+	return []db.UnusedAnalysisRow{{Job: "api", Source: "source-a", Total: 10, Unused: 4}}, nil
+}
+
+func TestAnalyzeUnused(t *testing.T) {
+	t.Parallel()
+	p := &analysisProvider{}
+	r := newTestRouter(t, p)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/analysis/unused?groupBy=job,source&source=source-a", nil))
+	require.Equal(t, 200, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"data":[{"job":"api","source":"source-a","total":10,"unused":4}]}`, w.Body.String())
+	assert.Equal(t, db.UnusedAnalysisByJobSource, p.got.GroupBy)
+	assert.Equal(t, "source-a", p.got.Source)
+	assert.WithinDuration(t, time.Now().Add(-30*24*time.Hour), p.got.SyncedSince, time.Minute,
+		"rows count only if synced within the inventory time window")
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/analysis/unused", nil))
+	require.Equal(t, 200, w.Code)
+	assert.Equal(t, db.UnusedAnalysisByJob, p.got.GroupBy, "grouped by job by default")
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/analysis/unused?groupBy=pod", nil))
+	assert.Equal(t, 400, w.Code)
+}

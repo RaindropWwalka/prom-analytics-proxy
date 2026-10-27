@@ -134,6 +134,7 @@ func WithHandlers(uiFS fs.FS, registry *prometheus.Registry, isTracingEnabled bo
 		mux.Handle("/api/v1/serieUsage/{name}", http.HandlerFunc(r.GetMetricUsage))
 		mux.Handle("/api/v1/jobs", http.HandlerFunc(r.listJobs))
 		mux.Handle("/api/v1/sources", http.HandlerFunc(r.listSources))
+		mux.Handle("/api/v1/analysis/unused", http.HandlerFunc(r.analyzeUnused))
 		mux.Handle("/api/v1/metrics/unused", http.HandlerFunc(r.metricsUnused))
 
 		// endpoint for perses metrics usage push from the client
@@ -1505,6 +1506,49 @@ func (r *routes) listSources(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSONResponse(req, w, models.SourcesResponse{Data: sources})
+}
+
+// @Summary Unused metrics analysis
+// @Description Count the catalog's metrics and how many are unused, per job, per metadata source, or per job and source. Metrics not synced within the inventory time window are left out.
+// @Tags metrics
+// @Produce json
+// @Param groupBy query string false "job (default), source, or job,source"
+// @Param job query string false "Keep only this job"
+// @Param source query string false "Keep only this source"
+// @Success 200 {object} UnusedAnalysisResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /api/v1/analysis/unused [get]
+func (r *routes) analyzeUnused(w http.ResponseWriter, req *http.Request) {
+	groupBy := req.FormValue("groupBy")
+	if groupBy == "" {
+		groupBy = db.UnusedAnalysisByJob
+	}
+	switch groupBy {
+	case db.UnusedAnalysisByJob, db.UnusedAnalysisBySource, db.UnusedAnalysisByJobSource:
+	default:
+		writeErrorResponse(req, w, fmt.Errorf("groupBy must be job, source or job,source (got %q)", groupBy), http.StatusBadRequest)
+		return
+	}
+	window := config.DefaultConfig.Inventory.TimeWindow
+	if r.config != nil && r.config.Inventory.TimeWindow > 0 {
+		window = r.config.Inventory.TimeWindow
+	}
+	rows, err := r.dbProvider.AnalyzeUnusedMetrics(req.Context(), db.UnusedAnalysisParams{
+		GroupBy:     groupBy,
+		Job:         req.FormValue("job"),
+		Source:      req.FormValue("source"),
+		SyncedSince: time.Now().Add(-window),
+	})
+	if err != nil {
+		slog.Error("unable to analyze unused metrics", "err", err)
+		writeErrorResponse(req, w, fmt.Errorf("unable to analyze unused metrics: %w", err), http.StatusInternalServerError)
+		return
+	}
+	if rows == nil {
+		rows = []db.UnusedAnalysisRow{}
+	}
+	writeJSONResponse(req, w, UnusedAnalysisResponse{Data: rows})
 }
 
 // @Summary Check unused metrics
