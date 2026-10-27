@@ -319,3 +319,12 @@ func TestSyncer_CardinalityOffReadsNoTSDBStatus(t *testing.T) {
 	assert.Zero(t, prom.tsdbCalls)
 	assert.Empty(t, provider.cardinality)
 }
+
+func TestSyncer_CardinalityLimitCoversWhatASourceReported(t *testing.T) {
+	s := &Syncer{cardinalityLimit: 1000}
+	assert.Equal(t, uint64(1000), s.cardinalityLimitFor(48902), "without covering, the fixed top-N")
+
+	s.cardinalityCoverMetadata = true
+	assert.Equal(t, uint64(48902), s.cardinalityLimitFor(48902), "every metric the source reported")
+	assert.Equal(t, uint64(1000), s.cardinalityLimitFor(300), "never below the configured limit")
+}

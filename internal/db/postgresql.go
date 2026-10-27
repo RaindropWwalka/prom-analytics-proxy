@@ -1339,8 +1339,9 @@ func (p *PostGreSQLProvider) UpsertMetricsCatalogSources(ctx context.Context, so
 	return nil
 }
 
-func (p *PostGreSQLProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int) error {
+func (p *PostGreSQLProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int, refreshBefore time.Time) error {
 	names, counts := cardinalityArrays(series)
+	refresh := refreshBefore.UTC().Format(ISOTimeFormat)
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -1352,15 +1353,24 @@ func (p *PostGreSQLProvider) ReplaceMetricsCardinality(ctx context.Context, sour
     `, source, pq.Array(names)); err != nil {
 		return fmt.Errorf("drop stale cardinality: %w", err)
 	}
-	if len(names) > 0 {
+	// Rows still close to the new count and recently written are filtered
+	// out before the INSERT, so they aren't touched at all.
+	for start := 0; start < len(names); start += cardinalityChunk {
+		end := min(start+cardinalityChunk, len(names))
 		if _, err := tx.ExecContext(ctx, `
             INSERT INTO metrics_cardinality(name, source, series, updated_at)
             SELECT n, $1, c, NOW() AT TIME ZONE 'UTC'
             FROM unnest($2::text[], $3::bigint[]) AS x(n, c)
+            WHERE NOT EXISTS (
+                SELECT 1 FROM metrics_cardinality k
+                WHERE k.name = n AND k.source = $1
+                  AND k.updated_at >= $4
+                  AND abs(k.series - c) * 10 <= k.series
+            )
             ON CONFLICT(name, source) DO UPDATE SET
               series = EXCLUDED.series,
               updated_at = EXCLUDED.updated_at
-        `, source, pq.Array(names), pq.Array(counts)); err != nil {
+        `, source, pq.Array(names[start:end]), pq.Array(counts[start:end]), refresh); err != nil {
 			return fmt.Errorf("upsert cardinality: %w", err)
 		}
 	}

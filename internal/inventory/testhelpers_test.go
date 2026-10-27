@@ -179,7 +179,7 @@ func (f *fakeProvider) UpsertMetricsCatalogSources(_ context.Context, source str
 	return nil
 }
 
-func (f *fakeProvider) ReplaceMetricsCardinality(_ context.Context, source string, series map[string]int) error {
+func (f *fakeProvider) ReplaceMetricsCardinality(_ context.Context, source string, series map[string]int, _ time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.cardinality == nil {

@@ -28,6 +28,7 @@ type Syncer struct {
 	metadataSourceTimeout         time.Duration
 	metadataSourceRefreshInterval time.Duration
 	cardinalityLimit              uint64
+	cardinalityCoverMetadata      bool
 	timeWindow                    time.Duration
 	metadataLim                   string
 	metadataSyncEnabled           bool
@@ -213,6 +214,7 @@ func NewSyncer(dbp db.Provider, upstream string, cfg *config.Config, reg prometh
 		metadataSourceTimeout:         inv.MetadataSourceTimeout,
 		metadataSourceRefreshInterval: inv.MetadataSourceRefreshInterval,
 		cardinalityLimit:              inv.CardinalityLimit,
+		cardinalityCoverMetadata:      inv.CardinalityCoverMetadata,
 		timeWindow:                    inv.TimeWindow,
 		metadataLim:                   lim,
 		metadataSyncEnabled:           inv.MetadataSyncEnabled,
@@ -402,7 +404,7 @@ func (s *Syncer) recordCatalogSources(ctx context.Context, reported []sourceCata
 		if r.series == nil {
 			continue
 		}
-		if err := s.dbProvider.ReplaceMetricsCardinality(ctx, r.source, r.series); err != nil {
+		if err := s.dbProvider.ReplaceMetricsCardinality(ctx, r.source, r.series, now.Add(-s.metadataSourceRefreshInterval)); err != nil {
 			fail("inventory: record cardinality", "source", r.source, "err", err)
 		}
 	}
@@ -442,7 +444,7 @@ func (s *Syncer) fetchCatalog(ctx context.Context, fetch func(context.Context, v
 			for i := range next {
 				results[i], errs[i] = s.fetchSource(ctx, sources[i], fetch)
 				if errs[i] == nil && s.readsCardinality(sources[i]) {
-					series[i] = s.fetchCardinality(ctx, sources[i])
+					series[i] = s.fetchCardinality(ctx, sources[i], s.cardinalityLimitFor(len(results[i])))
 				}
 			}
 		})
@@ -525,16 +527,26 @@ func (s *Syncer) readsCardinality(src metadataSource) bool {
 	return !nameOnly
 }
 
-// fetchCardinality reads src's head series per metric, its top
-// cardinalityLimit. It returns nil on failure, logged: the catalog doesn't
-// depend on it, and the last cycle's numbers stay until a read succeeds.
-func (s *Syncer) fetchCardinality(ctx context.Context, src metadataSource) map[string]int {
+// cardinalityLimitFor is how many metrics a source that reported
+// catalogued metrics is asked for: cardinalityLimit, or with
+// cardinalityCoverMetadata all of them if there are more.
+func (s *Syncer) cardinalityLimitFor(catalogued int) uint64 {
+	if s.cardinalityCoverMetadata && uint64(catalogued) > s.cardinalityLimit {
+		return uint64(catalogued)
+	}
+	return s.cardinalityLimit
+}
+
+// fetchCardinality reads src's head series per metric, its top limit. It
+// returns nil on failure, logged: the catalog doesn't depend on it, and the
+// last cycle's numbers stay until a read succeeds.
+func (s *Syncer) fetchCardinality(ctx context.Context, src metadataSource, limit uint64) map[string]int {
 	if s.metadataSourceTimeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.metadataSourceTimeout)
 		defer cancel()
 	}
-	status, err := src.api.TSDB(ctx, v1.WithLimit(s.cardinalityLimit))
+	status, err := src.api.TSDB(ctx, v1.WithLimit(limit))
 	if err != nil {
 		slog.Warn("inventory: read cardinality", "source", src.name, "err", err)
 		return nil

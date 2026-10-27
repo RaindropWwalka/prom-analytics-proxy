@@ -159,12 +159,16 @@ type InventoryConfig struct {
 	// (by head series, from /api/v1/status/tsdb) the catalog step records;
 	// 0 records none. Name-only sources - a Thanos Querier has no TSDB
 	// status to give - are skipped.
-	CardinalityLimit    uint64        `yaml:"cardinality_limit,omitempty"`
-	SyncInterval        time.Duration `yaml:"sync_interval,omitempty"`
-	TimeWindow          time.Duration `yaml:"time_window,omitempty"`
-	RunTimeout          time.Duration `yaml:"run_timeout,omitempty"`
-	MetadataStepTimeout time.Duration `yaml:"metadata_step_timeout,omitempty"`
-	SummaryStepTimeout  time.Duration `yaml:"summary_step_timeout,omitempty"`
+	CardinalityLimit uint64 `yaml:"cardinality_limit,omitempty"`
+	// CardinalityCoverMetadata asks each source for as many metrics as it
+	// reported to the catalog this sync - at least CardinalityLimit - so every
+	// metric it has gets its series count, not just the largest ones.
+	CardinalityCoverMetadata bool          `yaml:"cardinality_cover_metadata,omitempty"`
+	SyncInterval             time.Duration `yaml:"sync_interval,omitempty"`
+	TimeWindow               time.Duration `yaml:"time_window,omitempty"`
+	RunTimeout               time.Duration `yaml:"run_timeout,omitempty"`
+	MetadataStepTimeout      time.Duration `yaml:"metadata_step_timeout,omitempty"`
+	SummaryStepTimeout       time.Duration `yaml:"summary_step_timeout,omitempty"`
 	// JobSyncEnabled controls whether the syncer fetches job metadata from
 	// Prometheus and populates job_index. Set to false when you want to avoid heavy job queries.
 	JobSyncEnabled bool `yaml:"job_sync_enabled,omitempty"`
@@ -789,6 +793,7 @@ func logInventoryConfig(cfg *Config) {
 		"Inventory.MetadataSourceTimeout", cfg.Inventory.MetadataSourceTimeout,
 		"Inventory.MetadataSourceRefreshInterval", cfg.Inventory.MetadataSourceRefreshInterval,
 		"Inventory.CardinalityLimit", cfg.Inventory.CardinalityLimit,
+		"Inventory.CardinalityCoverMetadata", cfg.Inventory.CardinalityCoverMetadata,
 		"Inventory.SyncInterval", cfg.Inventory.SyncInterval,
 		"Inventory.TimeWindow", cfg.Inventory.TimeWindow,
 		"Inventory.RunTimeout", cfg.Inventory.RunTimeout,

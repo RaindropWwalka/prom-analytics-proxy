@@ -223,3 +223,6 @@ func groupCardinality(rows *sql.Rows) (map[string]map[string]int, error) {
 
 // serviceIndexChunk bounds how many service index rows one statement writes.
 const serviceIndexChunk = 5000
+
+// cardinalityChunk bounds how many cardinality rows one statement writes.
+const cardinalityChunk = 5000

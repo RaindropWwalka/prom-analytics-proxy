@@ -56,8 +56,11 @@ type Provider interface {
 	GetMetricsCatalogSources(ctx context.Context, names []string) (map[string][]string, error)
 	ListMetricsCatalogSources(ctx context.Context) ([]string, error)
 	// ReplaceMetricsCardinality makes series the whole of what's known about
-	// source's cardinality: metrics missing from it are dropped.
-	ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int) error
+	// source's cardinality: metrics missing from it are dropped. A metric's
+	// row is only rewritten when new, off by more than a tenth, or last
+	// written before refreshBefore - a source can report tens of thousands
+	// of metrics whose series barely move between syncs.
+	ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int, refreshBefore time.Time) error
 	// GetMetricsCardinality returns, for each of names, its series count per
 	// source. Names no source counted are absent.
 	GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error)

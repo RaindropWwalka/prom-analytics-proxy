@@ -657,7 +657,7 @@ func (m *MockDBProvider) ListServices(ctx context.Context) ([]string, error) {
 	return nil, nil
 }
 
-func (m *MockDBProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int) error {
+func (m *MockDBProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int, refreshBefore time.Time) error {
 	return nil
 }
 

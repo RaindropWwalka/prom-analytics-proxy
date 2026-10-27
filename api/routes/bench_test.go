@@ -949,7 +949,7 @@ func (p *benchDBProvider) ListServices(ctx context.Context) ([]string, error) {
 	return nil, nil
 }
 
-func (p *benchDBProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int) error {
+func (p *benchDBProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int, refreshBefore time.Time) error {
 	return nil
 }
 

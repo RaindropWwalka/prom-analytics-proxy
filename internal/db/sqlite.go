@@ -1120,7 +1120,7 @@ func (p *SQLiteProvider) UpsertMetricsCatalogSources(ctx context.Context, source
 	return nil
 }
 
-func (p *SQLiteProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int) error {
+func (p *SQLiteProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int, refreshBefore time.Time) error {
 	names, counts := cardinalityArrays(series)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -1141,7 +1141,12 @@ func (p *SQLiteProvider) ReplaceMetricsCardinality(ctx context.Context, source s
 	}
 	stmt, err := tx.PrepareContext(ctx, `
         INSERT INTO metrics_cardinality(name, source, series, updated_at)
-        VALUES (?, ?, ?, datetime('now'))
+        SELECT ?1, ?2, ?3, datetime('now')
+        WHERE NOT EXISTS (
+            SELECT 1 FROM metrics_cardinality
+            WHERE name = ?1 AND source = ?2 AND updated_at >= ?4
+              AND abs(series - ?3) * 10 <= series
+        )
         ON CONFLICT(name, source) DO UPDATE SET
             series = excluded.series,
             updated_at = excluded.updated_at
@@ -1150,8 +1155,9 @@ func (p *SQLiteProvider) ReplaceMetricsCardinality(ctx context.Context, source s
 		return fmt.Errorf("prepare: %w", err)
 	}
 	defer CloseResource(stmt)
+	refresh := refreshBefore.UTC().Format(SQLiteTimeFormat)
 	for i, name := range names {
-		if _, err := stmt.ExecContext(ctx, name, source, counts[i]); err != nil {
+		if _, err := stmt.ExecContext(ctx, name, source, counts[i], refresh); err != nil {
 			return fmt.Errorf("upsert cardinality: %w", err)
 		}
 	}
