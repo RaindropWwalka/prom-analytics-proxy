@@ -90,6 +90,8 @@ export interface MetricMetadata {
 
 export interface Producer {
   job: string;
+  // The Prometheus the series came from; absent when not split by source.
+  source?: string;
   series: number;
 }
 
