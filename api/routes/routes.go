@@ -1549,7 +1549,7 @@ func (r *routes) listServices(w http.ResponseWriter, req *http.Request) {
 // @Description Count the catalog's metrics and how many are unused, per job, per metadata source, or per job and source. Metrics not synced within the inventory time window are left out.
 // @Tags metrics
 // @Produce json
-// @Param groupBy query string false "job (default), service, source, job,source or service,source"
+// @Param groupBy query string false "Any of job, service, source, in that order, comma separated (default job)"
 // @Param job query string false "Keep only this job"
 // @Param service query string false "Keep only this service"
 // @Param source query string false "Keep only this source"
@@ -1564,9 +1564,10 @@ func (r *routes) analyzeUnused(w http.ResponseWriter, req *http.Request) {
 	}
 	switch groupBy {
 	case db.UnusedAnalysisByJob, db.UnusedAnalysisBySource, db.UnusedAnalysisByJobSource,
-		db.UnusedAnalysisByService, db.UnusedAnalysisByServiceSource:
+		db.UnusedAnalysisByService, db.UnusedAnalysisByServiceSource,
+		db.UnusedAnalysisByJobService, db.UnusedAnalysisByJobServiceSource:
 	default:
-		writeErrorResponse(req, w, fmt.Errorf("groupBy must be job, service, source, job,source or service,source (got %q)", groupBy), http.StatusBadRequest)
+		writeErrorResponse(req, w, fmt.Errorf("groupBy must list job, service and/or source, in that order, comma separated (got %q)", groupBy), http.StatusBadRequest)
 		return
 	}
 	window := config.DefaultConfig.Inventory.TimeWindow

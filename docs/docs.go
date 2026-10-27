@@ -36,7 +36,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "job (default), service, source, job,source or service,source",
+                        "description": "Any of job, service, source, in that order, comma separated (default job)",
                         "name": "groupBy",
                         "in": "query"
                     },

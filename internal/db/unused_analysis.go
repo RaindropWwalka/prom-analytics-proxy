@@ -159,6 +159,68 @@ const (
           AND (? = '' OR src.source = ?)
         GROUP BY svc.service, src.source
         ORDER BY 5 DESC, 2, 3`
+	// Services within jobs: metrics_service_index keeps the job each service
+	// was seen under.
+	pgUnusedByJobServiceSQL = `
+        SELECT svc.job, svc.service, '' AS source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+        FROM metrics_service_index svc
+        JOIN metrics_catalog c ON c.name = svc.name
+        JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN (SELECT name, SUM(series) AS series FROM metrics_cardinality GROUP BY name) k ON k.name = c.name
+        WHERE c.last_synced_at >= $1
+          AND ($2 = '' OR svc.job = $2)
+          AND ($3 = '' OR svc.service = $3)
+        GROUP BY svc.job, svc.service
+        ORDER BY 5 DESC, 1, 2`
+	pgUnusedByJobServiceSourceSQL = `
+        SELECT svc.job, svc.service, src.source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+        FROM metrics_service_index svc
+        JOIN metrics_catalog_sources src ON src.name = svc.name
+        JOIN metrics_catalog c ON c.name = svc.name
+        JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN metrics_cardinality k ON k.name = src.name AND k.source = src.source
+        WHERE c.last_synced_at >= $1
+          AND ($2 = '' OR svc.job = $2)
+          AND ($3 = '' OR svc.service = $3)
+          AND ($4 = '' OR src.source = $4)
+        GROUP BY svc.job, svc.service, src.source
+        ORDER BY 5 DESC, 1, 2, 3`
+	sqliteUnusedByJobServiceSQL = `
+        SELECT svc.job, svc.service, '' AS source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+        FROM metrics_service_index svc
+        JOIN metrics_catalog c ON c.name = svc.name
+        JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN (SELECT name, SUM(series) AS series FROM metrics_cardinality GROUP BY name) k ON k.name = c.name
+        WHERE c.last_synced_at >= ?
+          AND (? = '' OR svc.job = ?)
+          AND (? = '' OR svc.service = ?)
+        GROUP BY svc.job, svc.service
+        ORDER BY 5 DESC, 1, 2`
+	sqliteUnusedByJobServiceSourceSQL = `
+        SELECT svc.job, svc.service, src.source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+        FROM metrics_service_index svc
+        JOIN metrics_catalog_sources src ON src.name = svc.name
+        JOIN metrics_catalog c ON c.name = svc.name
+        JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN metrics_cardinality k ON k.name = src.name AND k.source = src.source
+        WHERE c.last_synced_at >= ?
+          AND (? = '' OR svc.job = ?)
+          AND (? = '' OR svc.service = ?)
+          AND (? = '' OR src.source = ?)
+        GROUP BY svc.job, svc.service, src.source
+        ORDER BY 5 DESC, 1, 2, 3`
 )
 
 func (p *PostGreSQLProvider) AnalyzeUnusedMetrics(ctx context.Context, params UnusedAnalysisParams) ([]UnusedAnalysisRow, error) {
@@ -174,6 +236,10 @@ func (p *PostGreSQLProvider) AnalyzeUnusedMetrics(ctx context.Context, params Un
 		return queryUnusedAnalysis(ctx, p.db, pgUnusedByServiceSQL, since, params.Service)
 	case UnusedAnalysisByServiceSource:
 		return queryUnusedAnalysis(ctx, p.db, pgUnusedByServiceSourceSQL, since, params.Service, params.Source)
+	case UnusedAnalysisByJobService:
+		return queryUnusedAnalysis(ctx, p.db, pgUnusedByJobServiceSQL, since, params.Job, params.Service)
+	case UnusedAnalysisByJobServiceSource:
+		return queryUnusedAnalysis(ctx, p.db, pgUnusedByJobServiceSourceSQL, since, params.Job, params.Service, params.Source)
 	}
 	return nil, fmt.Errorf("unknown grouping %q", params.GroupBy)
 }
@@ -191,6 +257,10 @@ func (p *SQLiteProvider) AnalyzeUnusedMetrics(ctx context.Context, params Unused
 		return queryUnusedAnalysis(ctx, p.db, sqliteUnusedByServiceSQL, since, params.Service, params.Service)
 	case UnusedAnalysisByServiceSource:
 		return queryUnusedAnalysis(ctx, p.db, sqliteUnusedByServiceSourceSQL, since, params.Service, params.Service, params.Source, params.Source)
+	case UnusedAnalysisByJobService:
+		return queryUnusedAnalysis(ctx, p.db, sqliteUnusedByJobServiceSQL, since, params.Job, params.Job, params.Service, params.Service)
+	case UnusedAnalysisByJobServiceSource:
+		return queryUnusedAnalysis(ctx, p.db, sqliteUnusedByJobServiceSourceSQL, since, params.Job, params.Job, params.Service, params.Service, params.Source, params.Source)
 	}
 	return nil, fmt.Errorf("unknown grouping %q", params.GroupBy)
 }

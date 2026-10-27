@@ -362,11 +362,13 @@ type RecentQueriesResult struct {
 
 // Ways AnalyzeUnusedMetrics can group the catalog.
 const (
-	UnusedAnalysisByJob           = "job"
-	UnusedAnalysisBySource        = "source"
-	UnusedAnalysisByJobSource     = "job,source"
-	UnusedAnalysisByService       = "service"
-	UnusedAnalysisByServiceSource = "service,source"
+	UnusedAnalysisByJob              = "job"
+	UnusedAnalysisBySource           = "source"
+	UnusedAnalysisByJobSource        = "job,source"
+	UnusedAnalysisByService          = "service"
+	UnusedAnalysisByServiceSource    = "service,source"
+	UnusedAnalysisByJobService       = "job,service"
+	UnusedAnalysisByJobServiceSource = "job,service,source"
 )
 
 type UnusedAnalysisParams struct {

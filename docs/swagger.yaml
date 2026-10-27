@@ -505,7 +505,8 @@ paths:
         per metadata source, or per job and source. Metrics not synced within the
         inventory time window are left out.
       parameters:
-      - description: job (default), service, source, job,source or service,source
+      - description: Any of job, service, source, in that order, comma separated
+          (default job)
         in: query
         name: groupBy
         type: string
