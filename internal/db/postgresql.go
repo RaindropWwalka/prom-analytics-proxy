@@ -425,6 +425,8 @@ func (p *PostGreSQLProvider) GetQueriesBySerieName(
 		"avgDuration":     true,
 		"avgPeakySamples": true,
 		"maxPeakSamples":  true,
+		"executions":      true,
+		"lastRun":         true,
 	}
 	ValidateSortField(&params.SortBy, &params.SortOrder, validSortFields, "avgDuration")
 
@@ -434,7 +436,19 @@ func (p *PostGreSQLProvider) GetQueriesBySerieName(
 			queryParam,
 			AVG(duration) AS avgDuration,
 			AVG(peakSamples) AS avgPeakySamples,
-			MAX(peakSamples) AS maxPeakSamples
+			MAX(peakSamples) AS maxPeakSamples,
+			MAX(ts) AS lastRun,
+			COUNT(*) AS executions,
+			COUNT(*) FILTER (WHERE httpHeaders->>'fromalert' = 'true') AS alertRuns,
+			COUNT(*) FILTER (WHERE httpHeaders ? 'x-dashboard-uid'
+				AND COALESCE(httpHeaders->>'fromalert', '') <> 'true') AS dashboardRuns,
+			COALESCE(jsonb_agg(DISTINCT COALESCE(httpHeaders->>'x-dashboard-title', httpHeaders->>'x-dashboard-uid'))
+				FILTER (WHERE httpHeaders ? 'x-dashboard-uid'
+					AND COALESCE(httpHeaders->>'fromalert', '') <> 'true'), '[]') AS dashboards,
+			COALESCE(jsonb_agg(DISTINCT httpHeaders->>'x-rule-name')
+				FILTER (WHERE httpHeaders->>'fromalert' = 'true'), '[]') AS rules,
+			COALESCE(jsonb_agg(DISTINCT COALESCE(httpHeaders->>'x-client-name', httpHeaders->>'user-agent'))
+				FILTER (WHERE NOT (COALESCE(httpHeaders, '{}'::jsonb) ?| ARRAY['x-dashboard-uid', 'fromalert'])), '[]') AS clients
 		FROM
 			queries
 		WHERE

@@ -307,6 +307,8 @@ func (p *SQLiteProvider) GetQueriesBySerieName(ctx context.Context, params Queri
 		"avgDuration":     true,
 		"avgPeakySamples": true,
 		"maxPeakSamples":  true,
+		"executions":      true,
+		"lastRun":         true,
 	}
 	ValidateSortField(&params.SortBy, &params.SortOrder, validSortFields, "avgDuration")
 
@@ -318,7 +320,20 @@ func (p *SQLiteProvider) GetQueriesBySerieName(ctx context.Context, params Queri
 			queryParam,
 			AVG(duration) AS avgDuration,
 			AVG(peakSamples) AS avgPeakySamples,
-			MAX(peakSamples) AS maxPeakSamples
+			MAX(peakSamples) AS maxPeakSamples,
+			MAX(ts) AS lastRun,
+			COUNT(*) AS executions,
+			SUM(CASE WHEN json_extract(httpHeaders, '$.fromalert') = 'true' THEN 1 ELSE 0 END) AS alertRuns,
+			SUM(CASE WHEN json_extract(httpHeaders, '$."x-dashboard-uid"') IS NOT NULL
+				AND COALESCE(json_extract(httpHeaders, '$.fromalert'), '') <> 'true' THEN 1 ELSE 0 END) AS dashboardRuns,
+			json_group_array(DISTINCT COALESCE(json_extract(httpHeaders, '$."x-dashboard-title"'), json_extract(httpHeaders, '$."x-dashboard-uid"')))
+				FILTER (WHERE json_extract(httpHeaders, '$."x-dashboard-uid"') IS NOT NULL
+					AND COALESCE(json_extract(httpHeaders, '$.fromalert'), '') <> 'true') AS dashboards,
+			json_group_array(DISTINCT json_extract(httpHeaders, '$."x-rule-name"'))
+				FILTER (WHERE json_extract(httpHeaders, '$.fromalert') = 'true') AS rules,
+			json_group_array(DISTINCT COALESCE(json_extract(httpHeaders, '$."x-client-name"'), json_extract(httpHeaders, '$."user-agent"')))
+				FILTER (WHERE json_extract(httpHeaders, '$."x-dashboard-uid"') IS NULL
+					AND json_extract(httpHeaders, '$.fromalert') IS NULL) AS clients
 		FROM
 			queries
 		WHERE
@@ -350,6 +365,8 @@ func (p *SQLiteProvider) GetQueriesBySerieName(ctx context.Context, params Queri
 				WHEN 'avgDuration' THEN avgDuration
 				WHEN 'avgPeakySamples' THEN avgPeakySamples
 				WHEN 'maxPeakSamples' THEN maxPeakSamples
+				WHEN 'executions' THEN executions
+				WHEN 'lastRun' THEN lastRun
 			END
 		END ASC,
 		CASE WHEN ? = 'desc' THEN
@@ -358,6 +375,8 @@ func (p *SQLiteProvider) GetQueriesBySerieName(ctx context.Context, params Queri
 				WHEN 'avgDuration' THEN avgDuration
 				WHEN 'avgPeakySamples' THEN avgPeakySamples
 				WHEN 'maxPeakSamples' THEN maxPeakSamples
+				WHEN 'executions' THEN executions
+				WHEN 'lastRun' THEN lastRun
 			END
 		END DESC
 	LIMIT ? OFFSET ?;

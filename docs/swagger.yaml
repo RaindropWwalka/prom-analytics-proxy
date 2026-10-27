@@ -64,10 +64,30 @@ definitions:
     type: object
   db.QueriesBySerieNameResult:
     properties:
+      alertRuns:
+        type: integer
       avgDuration:
         type: number
       avgPeakySamples:
         type: number
+      clients:
+        items:
+          type: string
+        type: array
+      dashboardRuns:
+        type: integer
+      dashboards:
+        description: |-
+          Which dashboards (by title, else uid), alert rules and other clients
+          (X-Client-Name, else User-Agent) ran it.
+        items:
+          type: string
+        type: array
+      executions:
+        description: |-
+          Executions splits into DashboardRuns (a Grafana panel), AlertRuns
+          (Grafana alerting) and the rest, by the headers stored with each run.
+        type: integer
       httpHeaders:
         additionalProperties:
           type: string
@@ -76,7 +96,13 @@ definitions:
         type: integer
       query:
         type: string
+      rules:
+        items:
+          type: string
+        type: array
       ts:
+        description: |-
+          TS is when the query last ran in the range.
         type: string
     type: object
   db.Query:
