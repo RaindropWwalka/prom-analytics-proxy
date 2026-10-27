@@ -55,6 +55,7 @@ interface ApiConfig {
     metricUsage: string;
     producers: string;
     sources: string;
+    unusedAnalysis: string;
   };
 }
 
@@ -86,6 +87,7 @@ const API_CONFIG: ApiConfig = {
     metricUsage: "/api/v1/serieUsage",
     producers: "/api/v1/jobs",
     sources: "/api/v1/sources",
+    unusedAnalysis: "/api/v1/analysis/unused",
   },
 };
 
@@ -329,5 +331,29 @@ export async function getSources(): Promise<string[]> {
   );
   if (!res.ok) throw new Error(`Failed to fetch sources: ${res.status}`);
   const body = (await res.json()) as { data: string[] };
+  return body.data || [];
+}
+
+export type UnusedAnalysisGroupBy = "job" | "source" | "job,source";
+
+export interface UnusedAnalysisRow {
+  job?: string;
+  source?: string;
+  total: number;
+  unused: number;
+}
+
+// analyzeUnused counts the catalog's metrics and how many are unused, per
+// job and/or source, largest number of unused first.
+export async function analyzeUnused(
+  groupBy: UnusedAnalysisGroupBy,
+): Promise<UnusedAnalysisRow[]> {
+  const params = new URLSearchParams({ groupBy });
+  const res = await fetch(
+    `${API_CONFIG.baseUrl}${API_CONFIG.endpoints.unusedAnalysis}?${params}`,
+  );
+  if (!res.ok)
+    throw new Error(`Failed to analyze unused metrics: ${res.status}`);
+  const body = (await res.json()) as { data: UnusedAnalysisRow[] };
   return body.data || [];
 }

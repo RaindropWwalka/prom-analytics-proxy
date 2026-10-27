@@ -32,8 +32,12 @@ interface LayoutProps {
 
 export default function Layout({ children, breadcrumb }: LayoutProps) {
   const [location] = useLocation();
-  const showFilterPanel =
-    location !== "/metrics-explorer" && location !== "/settings";
+  // Pages that don't read the date range don't offer it.
+  const showFilterPanel = ![
+    "/metrics-explorer",
+    "/settings",
+    "/analysis",
+  ].includes(location);
 
   return (
     <ErrorBoundaryWithToast>
