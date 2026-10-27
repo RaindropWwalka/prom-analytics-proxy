@@ -2,9 +2,12 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nicolastakashi/prom-analytics-proxy/internal/config"
@@ -13,11 +16,15 @@ import (
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	promconfig "github.com/prometheus/common/config"
 )
 
 type Syncer struct {
-	dbProvider              db.Provider
-	promAPI                 v1.API
+	dbProvider db.Provider
+	promAPI    v1.API
+	// metadataSources are what the catalog step reads; when empty it reads
+	// promAPI, the upstream, like every other step (see catalogSources).
+	metadataSources         []metadataSource
 	timeWindow              time.Duration
 	metadataLim             string
 	metadataSyncEnabled     bool
@@ -38,6 +45,14 @@ type Syncer struct {
 	syncFailure            prometheus.Counter
 	catalogSummaryMismatch prometheus.Counter
 	jobIndexFailure        prometheus.Counter
+	metadataSourceFailure  *prometheus.CounterVec
+}
+
+// metadataSource is one API the catalog step reads, named for logs and
+// metrics by its URL with any credentials redacted.
+type metadataSource struct {
+	name string
+	api  v1.API
 }
 
 // stepOverrunAllowance is what a cycle budget has to carry, per enabled
@@ -160,6 +175,23 @@ func NewSyncer(dbp db.Provider, upstream string, cfg *config.Config, reg prometh
 		"run_timeout", inv.RunTimeout,
 		"job_index_timeout", inv.JobIndexTimeout)
 
+	sources := make([]metadataSource, 0, len(inv.MetadataSources))
+	for i, src := range inv.MetadataSources {
+		if err := src.Validate(); err != nil {
+			return nil, fmt.Errorf("inventory.metadata_sources[%d]: %w", i, err)
+		}
+		name := redactURL(src.URL)
+		rt, err := promconfig.NewRoundTripperFromConfig(src.HTTPClientConfig, "prom-analytics-proxy-inventory")
+		if err != nil {
+			return nil, fmt.Errorf("inventory.metadata_sources[%d] (%s): %w", i, name, err)
+		}
+		c, err := api.NewClient(api.Config{Address: src.URL, RoundTripper: rt})
+		if err != nil {
+			return nil, fmt.Errorf("inventory.metadata_sources[%d] (%s): %w", i, name, err)
+		}
+		sources = append(sources, metadataSource{name: name, api: v1.NewAPI(c)})
+	}
+
 	lim := ""
 	if cfg.MetadataLimit > 0 {
 		lim = strconv.FormatUint(cfg.MetadataLimit, 10)
@@ -167,6 +199,7 @@ func NewSyncer(dbp db.Provider, upstream string, cfg *config.Config, reg prometh
 	s := &Syncer{
 		dbProvider:              dbp,
 		promAPI:                 v1.NewAPI(client),
+		metadataSources:         sources,
 		timeWindow:              inv.TimeWindow,
 		metadataLim:             lim,
 		metadataSyncEnabled:     inv.MetadataSyncEnabled,
@@ -205,8 +238,22 @@ func NewSyncer(dbp db.Provider, upstream string, cfg *config.Config, reg prometh
 		Name: "inventory_job_index_failure_total",
 		Help: "Total number of runs where the job-index step failed, leaving the index stale for the jobs it could not reach while the run itself still counted as a success",
 	})
+	s.metadataSourceFailure = promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+		Name: "inventory_metadata_source_failure_total",
+		Help: "Total number of catalog steps in which a metadata source could not be read; the catalog is still committed from the sources that answered unless every one of them failed",
+	}, []string{"source"})
 
 	return s, nil
+}
+
+// redactURL is how a source shows up in logs and metric labels: its URL,
+// minus any password written into it.
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return u.Redacted()
 }
 
 // RunOnce runs exactly one sync cycle, bounded by whatever ctx it's given -
@@ -264,14 +311,8 @@ func (s *Syncer) RunOnce(ctx context.Context) {
 // the summary refresh didn't.
 func (s *Syncer) syncCatalogAndSummary(cycleCtx context.Context) (catalogCommitted bool, err error) {
 	if s.metadataSyncEnabled {
-		if s.metadataMetricsNameOnly {
-			if err := s.syncMetadataCatalogFromMetricNames(cycleCtx); err != nil {
-				return false, err
-			}
-		} else {
-			if err := s.syncMetadataCatalog(cycleCtx); err != nil {
-				return false, err
-			}
+		if err := s.syncMetadataCatalog(cycleCtx); err != nil {
+			return false, err
 		}
 	} else {
 		slog.Info("inventory: metadata sync disabled, skipping catalog population")
@@ -286,13 +327,102 @@ func (s *Syncer) syncCatalogAndSummary(cycleCtx context.Context) (catalogCommitt
 	return true, nil
 }
 
+// syncMetadataCatalog reads every catalog source - the upstream, or the
+// configured metadata_sources - and commits what they returned as one
+// catalog. A source that fails costs only its own metrics: the step fails
+// only when no source answered, since committing nothing would gain nothing
+// over committing what the reachable ones know.
 func (s *Syncer) syncMetadataCatalog(ctx context.Context) error {
 	metaCtx, cancelMeta := context.WithTimeout(ctx, s.metadataStepTimeout)
 	defer cancelMeta()
-	meta, err := s.promAPI.Metadata(metaCtx, "", s.metadataLim)
+
+	fetch := s.fetchMetadataItems
+	if s.metadataMetricsNameOnly {
+		fetch = s.fetchMetricNameItems
+	}
+	items, err := s.fetchCatalog(metaCtx, fetch)
 	if err != nil {
-		slog.Error("inventory: fetch metadata", "err", err)
 		return err
+	}
+	if err := s.dbProvider.UpsertMetricsCatalog(metaCtx, items); err != nil {
+		slog.Error("inventory: upsert catalog", "err", err)
+		return err
+	}
+	return nil
+}
+
+// catalogSources is the upstream unless metadata_sources were configured.
+func (s *Syncer) catalogSources() []metadataSource {
+	if len(s.metadataSources) > 0 {
+		return s.metadataSources
+	}
+	return []metadataSource{{name: "upstream", api: s.promAPI}}
+}
+
+// fetchCatalog queries every catalog source concurrently, all under the
+// one metadata step budget, and merges what came back.
+func (s *Syncer) fetchCatalog(ctx context.Context, fetch func(context.Context, v1.API) ([]db.MetricCatalogItem, error)) ([]db.MetricCatalogItem, error) {
+	sources := s.catalogSources()
+	results := make([][]db.MetricCatalogItem, len(sources))
+	errs := make([]error, len(sources))
+	var wg sync.WaitGroup
+	for i, src := range sources {
+		wg.Go(func() {
+			results[i], errs[i] = fetch(ctx, src.api)
+		})
+	}
+	wg.Wait()
+
+	var failed []error
+	for i, err := range errs {
+		if err == nil {
+			continue
+		}
+		slog.Error("inventory: fetch catalog", "source", sources[i].name, "err", err)
+		if s.metadataSourceFailure != nil {
+			s.metadataSourceFailure.WithLabelValues(sources[i].name).Inc()
+		}
+		failed = append(failed, fmt.Errorf("%s: %w", sources[i].name, err))
+	}
+	if len(failed) == len(sources) {
+		return nil, errors.Join(failed...)
+	}
+	if len(failed) > 0 {
+		slog.Warn("inventory: some metadata sources failed; committing the catalog from the rest",
+			"failed", len(failed), "sources", len(sources))
+	}
+	return mergeCatalogItems(results), nil
+}
+
+// mergeCatalogItems keeps one item per metric name across sources. The
+// first source, in config order, to know a metric's type is the one whose
+// metadata is kept, so a name-only entry never blanks out a described one.
+func mergeCatalogItems(results [][]db.MetricCatalogItem) []db.MetricCatalogItem {
+	if len(results) == 1 {
+		return results[0]
+	}
+	index := make(map[string]int)
+	var merged []db.MetricCatalogItem
+	for _, items := range results {
+		for _, it := range items {
+			i, seen := index[it.Name]
+			if !seen {
+				index[it.Name] = len(merged)
+				merged = append(merged, it)
+				continue
+			}
+			if merged[i].Type == "" && it.Type != "" {
+				merged[i] = it
+			}
+		}
+	}
+	return merged
+}
+
+func (s *Syncer) fetchMetadataItems(ctx context.Context, promAPI v1.API) ([]db.MetricCatalogItem, error) {
+	meta, err := promAPI.Metadata(ctx, "", s.metadataLim)
+	if err != nil {
+		return nil, err
 	}
 
 	items := make([]db.MetricCatalogItem, 0, len(meta)*2)
@@ -319,22 +449,14 @@ func (s *Syncer) syncMetadataCatalog(ctx context.Context) error {
 			items = append(items, db.MetricCatalogItem{Name: name, Type: metricType, Help: info.Help, Unit: info.Unit})
 		}
 	}
-	if err := s.dbProvider.UpsertMetricsCatalog(metaCtx, items); err != nil {
-		slog.Error("inventory: upsert catalog", "err", err)
-		return err
-	}
-	return nil
+	return items, nil
 }
 
-func (s *Syncer) syncMetadataCatalogFromMetricNames(ctx context.Context) error {
-	metaCtx, cancelMeta := context.WithTimeout(ctx, s.metadataStepTimeout)
-	defer cancelMeta()
+func (s *Syncer) fetchMetricNameItems(ctx context.Context, promAPI v1.API) ([]db.MetricCatalogItem, error) {
 	now := time.Now()
-	labelValues, _, _, err := s.promAPI.LabelValues(metaCtx, "__name__", nil, now.Add(-s.timeWindow), now)
-
+	labelValues, _, _, err := promAPI.LabelValues(ctx, "__name__", nil, now.Add(-s.timeWindow), now)
 	if err != nil {
-		slog.Error("inventory: fetch label values", "err", err)
-		return err
+		return nil, err
 	}
 
 	items := make([]db.MetricCatalogItem, 0, len(labelValues))
@@ -342,12 +464,7 @@ func (s *Syncer) syncMetadataCatalogFromMetricNames(ctx context.Context) error {
 		if !labelValue.IsValid() {
 			continue
 		}
-
 		items = append(items, db.MetricCatalogItem{Name: string(labelValue)})
 	}
-	if err := s.dbProvider.UpsertMetricsCatalog(metaCtx, items); err != nil {
-		slog.Error("inventory: upsert catalog", "err", err)
-		return err
-	}
-	return nil
+	return items, nil
 }

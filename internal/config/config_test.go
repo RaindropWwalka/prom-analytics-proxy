@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/thanos-io/thanos/pkg/tracing/otlp"
+	yaml "gopkg.in/yaml.v3"
 )
 
 func TestDefaultConfig_Initialization(t *testing.T) {
@@ -351,4 +352,39 @@ func TestConfig_GetSanitizedConfig(t *testing.T) {
 			assert.Equal(t, tt.expectedFull, tt.config)
 		})
 	}
+}
+
+func TestInventoryMetadataSources_ParseWithPrometheusHTTPClientDefaults(t *testing.T) {
+	var cfg Config
+	err := yaml.Unmarshal([]byte(`
+inventory:
+  metadata_sources:
+  - url: http://prometheus:9090
+  - url: https://prometheus-remote.example.com
+    basic_auth:
+      username: reader
+      password_file: /etc/secret/password
+`), &cfg)
+	require.NoError(t, err)
+
+	srcs := cfg.Inventory.MetadataSources
+	require.Len(t, srcs, 2)
+	assert.Equal(t, "http://prometheus:9090", srcs[0].URL)
+	assert.Nil(t, srcs[0].HTTPClientConfig.BasicAuth)
+	assert.True(t, srcs[0].HTTPClientConfig.FollowRedirects, "Prometheus HTTP client defaults should apply to an inline block")
+	assert.True(t, srcs[0].HTTPClientConfig.EnableHTTP2, "Prometheus HTTP client defaults should apply to an inline block")
+
+	require.NotNil(t, srcs[1].HTTPClientConfig.BasicAuth)
+	assert.Equal(t, "reader", srcs[1].HTTPClientConfig.BasicAuth.Username)
+	assert.Equal(t, "/etc/secret/password", srcs[1].HTTPClientConfig.BasicAuth.PasswordFile)
+}
+
+func TestInventoryConfig_ValidateChecksMetadataSources(t *testing.T) {
+	cfg := DefaultConfig.Inventory
+	cfg.MetadataSources = []MetadataSourceConfig{{URL: "prometheus:9090"}}
+	assert.ErrorContains(t, cfg.Validate(), "inventory.metadata_sources[0]")
+
+	// Sources aren't read with metadata sync disabled, so they can't fail it.
+	cfg.MetadataSyncEnabled = false
+	assert.NoError(t, cfg.Validate())
 }
