@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DataTable, DataTableColumnHeader } from "@/components/data-table";
 import type { SortingState } from "@tanstack/react-table";
@@ -66,7 +66,15 @@ const formatTimeRangeDuration = (start: string, end: string): string => {
   }
 };
 
-const columns: ExtendedColumnDef<QueryExecution>[] = [
+// Which row's headers are open; the table keeps one open at a time.
+interface HeadersPopoverState {
+  isOpen: (row: number) => boolean;
+  setOpen: (row: number, open: boolean) => void;
+}
+
+const buildColumns = (
+  headers: HeadersPopoverState,
+): ExtendedColumnDef<QueryExecution>[] => [
   {
     accessorKey: "timestamp",
     size: 150,
@@ -238,7 +246,13 @@ const columns: ExtendedColumnDef<QueryExecution>[] = [
     id: "headers",
     size: 100,
     header: "Headers",
-    cell: ({ row }) => <HeadersPopover headers={row.original.httpHeaders} />,
+    cell: ({ row }) => (
+      <HeadersPopover
+        headers={row.original.httpHeaders}
+        open={headers.isOpen(row.index)}
+        onOpenChange={(open) => headers.setOpen(row.index, open)}
+      />
+    ),
   },
 ];
 
@@ -285,6 +299,14 @@ export const QueryExecutions: React.FC<Props> = ({ fingerprint }) => {
     });
   };
 
+  const handlePageSizeChange = (size: number) => {
+    setSearchParams((prev) => {
+      prev.set(PAGE_SIZE_KEY, size.toString());
+      prev.delete(PAGE_KEY);
+      return prev;
+    });
+  };
+
   const sortBy = useMemo(() => sorting[0]?.id || "timestamp", [sorting]);
   const serverSortBy = useMemo(() => {
     switch (sortBy) {
@@ -302,6 +324,15 @@ export const QueryExecutions: React.FC<Props> = ({ fingerprint }) => {
   );
 
   const filters = useExecutionsFilters();
+  const [openHeaders, setOpenHeaders] = useState<number | null>(null);
+  const columns = useMemo(
+    () =>
+      buildColumns({
+        isOpen: (row) => openHeaders === row,
+        setOpen: (row, open) => setOpenHeaders(open ? row : null),
+      }),
+    [openHeaders],
+  );
 
   const { data, isLoading } = useQuery<PagedResult<QueryExecution>>({
     queryKey: [
@@ -353,6 +384,7 @@ export const QueryExecutions: React.FC<Props> = ({ fingerprint }) => {
           totalPages={data?.totalPages || 1}
           onSortingChange={(s) => handleSortingChange(s)}
           onPaginationChange={(p) => handlePageChange(p)}
+          onPageSizeChange={handlePageSizeChange}
         />
       )}
     </div>

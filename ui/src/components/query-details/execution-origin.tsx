@@ -57,8 +57,13 @@ export function ExecutionOrigin({
 // HeadersPopover lists every header stored with an execution.
 export function HeadersPopover({
   headers,
+  open,
+  onOpenChange,
 }: {
   headers?: Record<string, string>;
+  // Controlled by the table, so opening one list closes the other.
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const entries = Object.entries(headers ?? {})
     .filter(([k, v]) => k.trim() !== "" && v.trim() !== "")
@@ -67,7 +72,7 @@ export function HeadersPopover({
     return <span className="text-muted-foreground">—</span>;
   }
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -77,7 +82,13 @@ export function HeadersPopover({
           {entries.length} {entries.length === 1 ? "header" : "headers"}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[28rem] max-w-[90vw]">
+      <PopoverContent
+        align="end"
+        className="w-[28rem] max-w-[90vw]"
+        // Returning focus to the trigger would close the next popover the
+        // user just opened.
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-xs">
           {entries.map(([k, v]) => (
             <div key={k} className="contents">
