@@ -49,16 +49,16 @@ export function MetricsExplorerHeader({
           Browse and analyze patterns and usage of your metrics
         </p>
       </div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         <Input
           placeholder="Search queries..."
-          className="sm:max-w-[300px]"
+          className="lg:min-w-[140px] lg:max-w-[300px] lg:flex-[2]"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
         />
         <Select value={typeFilter} onValueChange={onTypeFilterChange}>
-          <SelectTrigger className="sm:max-w-[140px]">
-            <div className="flex items-center gap-2">
+          <SelectTrigger className="w-full lg:min-w-[110px] lg:max-w-[150px] lg:flex-1">
+            <div className="flex min-w-0 items-center gap-2">
               <Filter className="h-4 w-4" />
               <SelectValue placeholder="All Types" />
             </div>
@@ -77,7 +77,7 @@ export function MetricsExplorerHeader({
             onProducerFilterChange?.(v === "__all__" ? "" : v)
           }
         >
-          <SelectTrigger className="w-[220px] sm:w-[240px] md:w-[280px] lg:w-[320px] text-left">
+          <SelectTrigger className="w-full text-left lg:min-w-[130px] lg:max-w-[320px] lg:flex-[2]">
             <div className="flex items-center gap-2 min-w-0">
               <Filter className="h-4 w-4 shrink-0" />
               <span
@@ -105,7 +105,7 @@ export function MetricsExplorerHeader({
             }
           >
             <SelectTrigger
-              className="w-[220px] sm:w-[240px] text-left"
+              className="w-full text-left lg:min-w-[130px] lg:max-w-[260px] lg:flex-[2]"
               aria-label="Source"
             >
               <div className="flex items-center gap-2 min-w-0">
@@ -134,8 +134,8 @@ export function MetricsExplorerHeader({
             onUsageFilterChange?.(v as "all" | "used" | "unused")
           }
         >
-          <SelectTrigger className="sm:max-w-[170px]">
-            <div className="flex items-center gap-2">
+          <SelectTrigger className="w-full lg:min-w-[120px] lg:max-w-[170px] lg:flex-1">
+            <div className="flex min-w-0 items-center gap-2">
               <Filter className="h-4 w-4" />
               <SelectValue placeholder="All Metrics" />
             </div>
