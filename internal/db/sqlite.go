@@ -1683,7 +1683,8 @@ func (p *SQLiteProvider) GetQueryExecutions(ctx context.Context, params QueryExe
 	from, to := sqliteTimeBounds(params.TimeRange)
 
 	query := `
-        WITH filtered AS (
+        WITH f AS (SELECT ? AS status, ? AS origin, ? AS header_search),
+        filtered AS (
             SELECT
                 ts,
                 statusCode,
@@ -1694,10 +1695,22 @@ func (p *SQLiteProvider) GetQueryExecutions(ctx context.Context, params QueryExe
                 "end",
                 step,
 				httpHeaders
-            FROM queries
+            FROM queries, f
             WHERE ts BETWEEN ? AND ?
               AND fingerprint = ?
               AND CASE WHEN ? != '' THEN type = ? ELSE 1=1 END
+              AND (f.status = ''
+                   OR (f.status = '2xx' AND statusCode BETWEEN 200 AND 299)
+                   OR (f.status = '4xx' AND statusCode BETWEEN 400 AND 499)
+                   OR (f.status = '5xx' AND statusCode >= 500)
+                   OR (f.status = 'error' AND (statusCode < 200 OR statusCode >= 300)))
+              AND (f.origin = ''
+                   OR (f.origin = 'alert' AND json_extract(httpHeaders, '$.fromalert') = 'true')
+                   OR (f.origin = 'dashboard' AND json_extract(httpHeaders, '$."x-dashboard-uid"') IS NOT NULL
+                       AND COALESCE(json_extract(httpHeaders, '$.fromalert'), '') <> 'true')
+                   OR (f.origin = 'other' AND json_extract(httpHeaders, '$."x-dashboard-uid"') IS NULL
+                       AND json_extract(httpHeaders, '$.fromalert') IS NULL))
+              AND (f.header_search = '' OR LOWER(COALESCE(httpHeaders, '')) LIKE '%' || LOWER(f.header_search) || '%')
         ), counted AS (
             SELECT COUNT(*) AS total_count FROM filtered
         )
@@ -1737,7 +1750,8 @@ func (p *SQLiteProvider) GetQueryExecutions(ctx context.Context, params QueryExe
         LIMIT ? OFFSET ?;
     `
 
-	args := []interface{}{from, to, params.Fingerprint, params.Type, params.Type,
+	args := []interface{}{params.Status, params.Origin, params.HeaderSearch,
+		from, to, params.Fingerprint, params.Type, params.Type,
 		params.SortOrder, params.SortBy, params.SortOrder, params.SortBy,
 		params.PageSize, (params.Page - 1) * params.PageSize,
 	}

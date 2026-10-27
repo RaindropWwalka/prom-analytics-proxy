@@ -256,7 +256,26 @@ type QueryExecutionsParams struct {
 	SortBy      string
 	SortOrder   string
 	Type        string // all|instant|range
+	// Status narrows by response code: 2xx|4xx|5xx|error (anything not 2xx).
+	Status string
+	// Origin narrows by who sent the query, as told by its stored headers:
+	// alert (Grafana alerting's FromAlert), dashboard (a Grafana dashboard
+	// panel, not alerting) or other (neither).
+	Origin string
+	// HeaderSearch matches any stored header name or value, case-insensitively.
+	HeaderSearch string
 }
+
+const (
+	ExecutionStatus2xx   = "2xx"
+	ExecutionStatus4xx   = "4xx"
+	ExecutionStatus5xx   = "5xx"
+	ExecutionStatusError = "error"
+
+	ExecutionOriginAlert     = "alert"
+	ExecutionOriginDashboard = "dashboard"
+	ExecutionOriginOther     = "other"
+)
 
 // QueryExecutionRow represents a single query execution row returned from the DB
 type QueryExecutionRow struct {
