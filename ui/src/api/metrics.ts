@@ -349,6 +349,8 @@ export interface UnusedAnalysisRow {
   source?: string;
   total: number;
   unused: number;
+  series: number;
+  unusedSeries: number;
 }
 
 // analyzeUnused counts the catalog's metrics and how many are unused, per

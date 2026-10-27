@@ -11,6 +11,8 @@ import { MetricMetadata, PagedResult, TableState } from "@/lib/types";
 import { fromUTC } from "@/lib/utils/date-utils";
 import { DataTable, DataTableColumnHeader } from "@/components/data-table";
 import { ROUTES } from "@/lib/routes";
+import { formatUnit } from "@/lib/utils";
+import { totalSeries } from "@/lib/utils/series";
 
 interface MetricsTableProps {
   metrics?: PagedResult<MetricMetadata>;
@@ -145,6 +147,28 @@ export function MetricsTable({
           {...popover(`sources:${row.original.name}`)}
         />
       ),
+    },
+    {
+      id: "series",
+      size: 90,
+      enableSorting: false,
+      header: "Series",
+      cell: ({ row }) => {
+        const series = row.original.series;
+        const total = totalSeries(series);
+        return total === undefined ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
+          <span
+            className="tabular-nums"
+            title={Object.entries(series ?? {})
+              .map(([source, n]) => `${source}: ${n}`)
+              .join("\n")}
+          >
+            {formatUnit(total)}
+          </span>
+        );
+      },
     },
     {
       accessorKey: "alertCount",

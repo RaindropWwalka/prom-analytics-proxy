@@ -7,6 +7,8 @@ import { MetricTypeTag } from "@/components/metrics-explorer/metric-type-tag";
 import { MetricSources } from "@/components/metrics-explorer/metric-sources";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMetricMetadata } from "@/app/metrics/use-metrics-data";
+import { formatUnit } from "@/lib/utils";
+import { totalSeries } from "@/lib/utils/series";
 
 interface MetricDetailHeaderProps {
   metricName: string;
@@ -43,6 +45,19 @@ export function MetricDetailHeader({ metricName }: MetricDetailHeaderProps) {
                   <span className="flex items-center gap-2">
                     <span className="text-muted-foreground">Unit</span>
                     {metadata.unit}
+                  </span>
+                )}
+                {totalSeries(metadata.series) !== undefined && (
+                  <span
+                    className="flex items-center gap-2"
+                    title={Object.entries(metadata.series ?? {})
+                      .map(([source, n]) => `${source}: ${n}`)
+                      .join("\n")}
+                  >
+                    <span className="text-muted-foreground">Series</span>
+                    <span className="tabular-nums">
+                      {formatUnit(totalSeries(metadata.series) ?? 0)}
+                    </span>
                   </span>
                 )}
                 <span className="flex min-w-0 items-center gap-2">

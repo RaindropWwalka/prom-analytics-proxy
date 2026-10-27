@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DataTable, DataTableColumnHeader } from "@/components/data-table";
+import { formatUnit } from "@/lib/utils";
 import {
   catalogLink,
   groupLabel,
@@ -46,11 +47,20 @@ import {
 // How many groups the chart shows; the table has them all.
 const CHART_GROUPS = 15;
 
-type Row = UnusedAnalysisRow & { label: string; used: number; pct: number };
+type Row = UnusedAnalysisRow & {
+  label: string;
+  used: number;
+  usedSeries: number;
+  pct: number;
+};
+
+type Measure = "metrics" | "series";
 
 export default function AnalysisPage() {
   const [, setLocation] = useLocation();
   const [groupBy, setGroupBy] = useState<UnusedAnalysisGroupBy>("job");
+  // What the chart ranks groups by: unused metrics, or the series they hold.
+  const [measure, setMeasure] = useState<Measure>("series");
   // The analysis aggregates the whole catalog, so it runs when asked to,
   // not on every visit.
   const [requested, setRequested] = useState<UnusedAnalysisGroupBy | null>(
@@ -78,11 +88,29 @@ export default function AnalysisPage() {
         ...r,
         label: groupLabel(r, shownGroupBy),
         used: r.total - r.unused,
+        usedSeries: r.series - r.unusedSeries,
         pct: unusedPercent(r),
       })),
     [data, shownGroupBy],
   );
+  const chartRows = useMemo(
+    () =>
+      [...rows].sort((a, b) =>
+        measure === "series"
+          ? b.unusedSeries - a.unusedSeries
+          : b.unused - a.unused,
+      ),
+    [rows, measure],
+  );
+  const hasSeries = rows.some((r) => r.series > 0);
   const sum = totals(rows);
+  const seriesSum = rows.reduce(
+    (acc, r) => ({
+      series: acc.series + r.series,
+      unused: acc.unused + r.unusedSeries,
+    }),
+    { series: 0, unused: 0 },
+  );
 
   const columns: LegacyColumnDef<Row>[] = [
     {
@@ -118,6 +146,28 @@ export default function AnalysisPage() {
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">{row.original.unused}</span>
+      ),
+    },
+    {
+      accessorKey: "series",
+      size: 110,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title="Series" />
+      ),
+      cell: ({ row }) => (
+        <span className="tabular-nums">{formatUnit(row.original.series)}</span>
+      ),
+    },
+    {
+      accessorKey: "unusedSeries",
+      size: 130,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title="Unused series" />
+      ),
+      cell: ({ row }) => (
+        <span className="tabular-nums">
+          {formatUnit(row.original.unusedSeries)}
+        </span>
       ),
     },
     {
@@ -185,21 +235,53 @@ export default function AnalysisPage() {
 
       {rows.length > 0 && (
         <>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryCard title="Metrics" value={sum.total} />
-            <SummaryCard title="Unused" value={sum.unused} />
+            <SummaryCard title="Unused metrics" value={sum.unused} />
             <SummaryCard
               title="Unused share"
               value={`${sum.total > 0 ? Math.round((sum.unused / sum.total) * 100) : 0}%`}
+            />
+            <SummaryCard
+              title="Unused series"
+              value={
+                hasSeries
+                  ? `${formatUnit(seriesSum.unused)} / ${formatUnit(seriesSum.series)}`
+                  : "—"
+              }
             />
           </div>
 
           <Card>
             <CardHeader>
-              <CardTitle>Most unused metrics</CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle>
+                  {measure === "series"
+                    ? "Most series in unused metrics"
+                    : "Most unused metrics"}
+                </CardTitle>
+                <Select
+                  value={measure}
+                  onValueChange={(v) => setMeasure(v as Measure)}
+                >
+                  <SelectTrigger className="w-[160px]" aria-label="Measure">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="series">By series</SelectItem>
+                    <SelectItem value="metrics">By metrics</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <CardDescription>
-                Top {Math.min(CHART_GROUPS, rows.length)} groups by unused
-                metrics.
+                Top {Math.min(CHART_GROUPS, rows.length)} groups by unused{" "}
+                {measure}.
+                {measure === "series" &&
+                  !hasSeries &&
+                  " No series recorded yet: needs inventory.cardinality_limit and metadata_sources."}
+                {measure === "series" &&
+                  hasSeries &&
+                  " Series are each source's head series; a metric shared by several groups counts under each."}
                 {shownGroupBy.endsWith(",source") &&
                   " A metric counts under every source reporting it."}
               </CardDescription>
@@ -210,7 +292,7 @@ export default function AnalysisPage() {
                 height={Math.max(200, Math.min(CHART_GROUPS, rows.length) * 32)}
               >
                 <BarChart
-                  data={rows.slice(0, CHART_GROUPS)}
+                  data={chartRows.slice(0, CHART_GROUPS)}
                   layout="vertical"
                   margin={{ left: 8, right: 16 }}
                 >
@@ -228,13 +310,13 @@ export default function AnalysisPage() {
                   <Tooltip />
                   <Legend />
                   <Bar
-                    dataKey="unused"
+                    dataKey={measure === "series" ? "unusedSeries" : "unused"}
                     name="Unused"
                     stackId="metrics"
                     fill="var(--chart-1)"
                   />
                   <Bar
-                    dataKey="used"
+                    dataKey={measure === "series" ? "usedSeries" : "used"}
                     name="Used"
                     stackId="metrics"
                     fill="var(--chart-3)"
