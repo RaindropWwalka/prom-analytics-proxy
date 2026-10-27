@@ -3,10 +3,9 @@
 import * as React from "react";
 import { type SortingState } from "@tanstack/react-table";
 import { type LegacyColumnDef } from "@tanstack/react-table/legacy";
-import { ArrowUpDown } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Producer } from "@/lib/types";
-import { DataTable } from "@/components/data-table";
+import { DataTable, DataTableColumnHeader } from "@/components/data-table";
 import {
   Card,
   CardHeader,
@@ -14,19 +13,26 @@ import {
   CardContent,
   CardDescription,
 } from "@/components/ui/card";
-
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useMetricStatistics } from "@/app/metrics/use-metrics-data";
 import { useDateRange } from "@/contexts/date-range";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  filterProducers,
+  NO_PRODUCER_FILTERS,
+  type ProducerFilters,
+} from "./producer-filters";
 
-const ALL_SOURCES = "__all__";
+// Producer columns that can outgrow their cell: the table shows their whole
+// value on hover.
+type TextColumn = "job" | "service" | "source";
+
+const TEXT_COLUMNS: { key: TextColumn; title: string }[] = [
+  { key: "job", title: "Job" },
+  { key: "service", title: "Service" },
+  { key: "source", title: "Source" },
+];
 
 interface MetricProducersProps {
   metricName: string;
@@ -40,88 +46,63 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
     [data.statistics],
   );
   // Local sorting state must be declared unconditionally to respect Hooks rules
-  const [sorting, setSorting] = React.useState<SortingState>([]);
-  const [sourceFilter, setSourceFilter] = React.useState(ALL_SOURCES);
+  const [sorting, setSorting] = React.useState<SortingState>([
+    { id: "series", desc: true },
+  ]);
+  const [filters, setFilters] =
+    React.useState<ProducerFilters>(NO_PRODUCER_FILTERS);
 
-  // Producers are split by source only when the proxy knows which
-  // Prometheus each series came from (producers_source_label).
-  const sources = React.useMemo(
+  // Only the columns the producers carry: source with
+  // producers_source_label, service with producers_service_label.
+  const shown = React.useMemo(
     () =>
-      [
-        ...new Set(allProducers.map((p) => p.source).filter(Boolean)),
-      ].sort() as string[],
+      TEXT_COLUMNS.filter(
+        ({ key }) => key === "job" || allProducers.some((p) => !!p[key]),
+      ),
     [allProducers],
   );
-  const hasServices = allProducers.some((p) => !!p.service);
   const producers = React.useMemo(
-    () =>
-      sourceFilter === ALL_SOURCES
-        ? allProducers
-        : allProducers.filter((p) => p.source === sourceFilter),
-    [allProducers, sourceFilter],
+    () => filterProducers(allProducers, filters),
+    [allProducers, filters],
   );
 
-  // Calculate total series for percentage calculations (empty while loading)
-  const totalSeries = producers.reduce(
-    (sum, producer) => sum + producer.series,
-    0,
-  );
+  // Contribution is a share of everything the metric has, not of what the
+  // filters leave, so it doesn't change as filters narrow the table.
+  const totalSeries = allProducers.reduce((sum, p) => sum + p.series, 0);
 
-  const columns = React.useMemo<LegacyColumnDef<Producer>[]>(
+  const columns = React.useMemo<
+    Array<LegacyColumnDef<Producer> & { maxWidth?: number }>
+  >(
     () => [
-      {
-        accessorKey: "job",
-        header: ({ column }) => {
-          return (
-            <div
-              className="flex cursor-pointer items-center"
-              onClick={() =>
-                column.toggleSorting(column.getIsSorted() === "asc")
-              }
-            >
-              Producer
-              <ArrowUpDown className="ml-2 h-4 w-4" />
-            </div>
-          );
-        },
-        cell: ({ row }) => (
-          <div className="font-medium">{row.getValue("job")}</div>
-        ),
-      },
-      ...(hasServices
-        ? [
-            {
-              accessorKey: "service",
-              header: "Service",
-              cell: ({ row }) => (
-                <div className="truncate">{row.original.service || "—"}</div>
-              ),
-            } satisfies LegacyColumnDef<Producer>,
-          ]
-        : []),
-      ...(sources.length > 0
-        ? [
-            {
-              accessorKey: "source",
-              header: "Source",
-              cell: ({ row }) => (
-                <div className="truncate text-muted-foreground">
-                  {row.original.source || "—"}
-                </div>
-              ),
-            } satisfies LegacyColumnDef<Producer>,
-          ]
-        : []),
+      ...shown.map(
+        ({
+          key,
+          title,
+        }): LegacyColumnDef<Producer> & { maxWidth?: number } => ({
+          accessorKey: key,
+          maxWidth: 320,
+          header: ({ column }) => (
+            <DataTableColumnHeader column={column} title={title} />
+          ),
+          cell: ({ row }) => (
+            <span className={key === "job" ? "font-medium" : undefined}>
+              {row.original[key] || "—"}
+            </span>
+          ),
+        }),
+      ),
       {
         id: "contribution",
+        size: 180,
         header: () => <div className="text-right">Contribution</div>,
         cell: ({ row }) => {
-          const series = row.getValue("series") as number;
-          const percentage = Math.round((series / totalSeries) * 100);
+          const percentage = totalSeries
+            ? Math.round((row.original.series / totalSeries) * 100)
+            : 0;
           return (
             <div className="flex items-center gap-2 justify-end">
               <Progress value={percentage} className="h-1.5" />
-              <span className="text-xs text-muted-foreground">
+              <span className="w-10 text-right text-xs text-muted-foreground">
                 {percentage}%
               </span>
             </div>
@@ -130,26 +111,18 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
       },
       {
         accessorKey: "series",
-        header: ({ column }) => {
-          return (
-            <div
-              className="flex cursor-pointer items-center justify-end"
-              onClick={() =>
-                column.toggleSorting(column.getIsSorted() === "asc")
-              }
-            >
-              Series
-              <ArrowUpDown className="ml-2 h-4 w-4" />
-            </div>
-          );
-        },
-        cell: ({ row }) => {
-          const series = row.getValue("series") as number;
-          return <div className="text-right">{series.toLocaleString()}</div>;
-        },
+        size: 110,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Series" />
+        ),
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums">
+            {row.original.series.toLocaleString()}
+          </div>
+        ),
       },
     ],
-    [totalSeries, sources.length, hasServices],
+    [shown, totalSeries],
   );
 
   if (isLoading) {
@@ -170,6 +143,8 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
     );
   }
 
+  const filtered = producers.length !== allProducers.length;
+
   return (
     <Card>
       <CardHeader>
@@ -180,29 +155,54 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
           <br />
           Each producer contributes to the total number of time series in your
           monitoring system. The same job scraped by several Prometheus is shown
-          once per Prometheus.
+          once per Prometheus, and a job carrying many services once per
+          service.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {sources.length > 0 && (
-          <Select value={sourceFilter} onValueChange={setSourceFilter}>
-            <SelectTrigger className="sm:w-[320px]" aria-label="Source">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_SOURCES}>All sources</SelectItem>
-              {sources.map((source) => (
-                <SelectItem key={source} value={source}>
-                  {source}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {shown.map(({ key, title }) => (
+            <Input
+              key={key}
+              aria-label={`Filter ${title}`}
+              placeholder={`${title} contains…`}
+              value={filters[key]}
+              onChange={(e) =>
+                setFilters((prev) => ({ ...prev, [key]: e.target.value }))
+              }
+            />
+          ))}
+          <Input
+            type="number"
+            min={0}
+            aria-label="Series at least"
+            placeholder="Series ≥"
+            value={filters.minSeries}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, minSeries: e.target.value }))
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            {filtered
+              ? `${producers.length} of ${allProducers.length} producers`
+              : `${allProducers.length} producers`}
+          </span>
+          {filtered && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setFilters(NO_PRODUCER_FILTERS)}
+              className="cursor-pointer"
+            >
+              Reset filters
+            </Button>
+          )}
+        </div>
         <DataTable
           data={producers}
           columns={columns}
-          searchColumn="job"
           pagination={true}
           pageSize={10}
           sortingState={sorting}
