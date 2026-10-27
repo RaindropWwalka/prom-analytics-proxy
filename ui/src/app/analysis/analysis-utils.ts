@@ -1,35 +1,57 @@
 import type { UnusedAnalysisGroupBy, UnusedAnalysisRow } from "@/api/metrics";
 import { ROUTES } from "@/lib/routes";
 
-// groupLabel names a row by what the analysis is grouped by.
+export type Dimension = "job" | "service" | "source";
+
+// DIMENSIONS is every grouping dimension, in the order the API takes them.
+export const DIMENSIONS: Dimension[] = ["job", "service", "source"];
+
+const DIMENSION_TITLES: Record<Dimension, string> = {
+  job: "Job",
+  service: "Service",
+  source: "Source",
+};
+
+// groupByOf turns the chosen dimensions into the API's groupBy, or null
+// when none is chosen.
+export function groupByOf(dims: Dimension[]): UnusedAnalysisGroupBy | null {
+  const ordered = DIMENSIONS.filter((d) => dims.includes(d));
+  return ordered.length ? (ordered.join(",") as UnusedAnalysisGroupBy) : null;
+}
+
+function dimensionsOf(groupBy: UnusedAnalysisGroupBy): Dimension[] {
+  return groupBy.split(",") as Dimension[];
+}
+
+// groupLabel names a row by what the analysis is grouped by:
+// "job / service @ source", with whichever parts the grouping has.
 export function groupLabel(
   row: UnusedAnalysisRow,
   groupBy: UnusedAnalysisGroupBy,
 ): string {
+  const dims = dimensionsOf(groupBy);
   const dash = (v?: string) => v || "—";
-  switch (groupBy) {
-    case "job":
-      return dash(row.job);
-    case "service":
-      return dash(row.service);
-    case "source":
-      return dash(row.source);
-    case "job,source":
-      return `${dash(row.job)} @ ${dash(row.source)}`;
-    case "service,source":
-      return `${dash(row.service)} @ ${dash(row.source)}`;
-  }
+  const owner = dims
+    .filter((d) => d !== "source")
+    .map((d) => dash(row[d]))
+    .join(" / ");
+  if (!dims.includes("source")) return owner;
+  return owner ? `${owner} @ ${dash(row.source)}` : dash(row.source);
 }
 
-// groupTitle names the grouping for headers.
+// groupTitle names the grouping for headers, in groupLabel's shape.
 export function groupTitle(groupBy: UnusedAnalysisGroupBy): string {
-  return {
-    job: "Job",
-    service: "Service",
-    source: "Source",
-    "job,source": "Job @ Source",
-    "service,source": "Service @ Source",
-  }[groupBy];
+  const dims = dimensionsOf(groupBy);
+  const owner = dims
+    .filter((d) => d !== "source")
+    .map((d) => DIMENSION_TITLES[d])
+    .join(" / ");
+  if (!dims.includes("source")) return owner;
+  return owner ? `${owner} @ Source` : "Source";
+}
+
+export function dimensionTitle(d: Dimension): string {
+  return DIMENSION_TITLES[d];
 }
 
 export function unusedPercent(row: UnusedAnalysisRow): number {

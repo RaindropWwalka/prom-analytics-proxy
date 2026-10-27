@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   catalogLink,
+  groupByOf,
   groupLabel,
+  groupTitle,
   totals,
   unusedPercent,
 } from "./analysis-utils";
@@ -41,5 +43,31 @@ describe("analysis utils", () => {
       total: 10,
       unused: 5,
     });
+  });
+});
+
+describe("grouping by dimensions", () => {
+  it("orders chosen dimensions the way the API takes them", () => {
+    expect(groupByOf(["source", "job"])).toBe("job,source");
+    expect(groupByOf(["service", "job", "source"])).toBe("job,service,source");
+    expect(groupByOf([])).toBeNull();
+  });
+
+  it("labels and titles any combination", () => {
+    const row = {
+      job: "jmx",
+      service: "billing",
+      source: "source-a",
+      total: 1,
+      unused: 0,
+      series: 0,
+      unusedSeries: 0,
+    };
+    expect(groupLabel(row, "job,service")).toBe("jmx / billing");
+    expect(groupLabel(row, "job,service,source")).toBe(
+      "jmx / billing @ source-a",
+    );
+    expect(groupTitle("job,service,source")).toBe("Job / Service @ Source");
+    expect(groupTitle("source")).toBe("Source");
   });
 });

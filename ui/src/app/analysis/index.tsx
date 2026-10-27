@@ -38,8 +38,12 @@ import { DataTable, DataTableColumnHeader } from "@/components/data-table";
 import { formatUnit } from "@/lib/utils";
 import {
   catalogLink,
+  DIMENSIONS,
+  dimensionTitle,
+  groupByOf,
   groupLabel,
   groupTitle,
+  type Dimension,
   totals,
   unusedPercent,
 } from "./analysis-utils";
@@ -58,7 +62,8 @@ type Measure = "metrics" | "series";
 
 export default function AnalysisPage() {
   const [, setLocation] = useLocation();
-  const [groupBy, setGroupBy] = useState<UnusedAnalysisGroupBy>("job");
+  const [dims, setDims] = useState<Dimension[]>(["job"]);
+  const groupBy = groupByOf(dims);
   // What the chart ranks groups by: unused metrics, or the series they hold.
   const [measure, setMeasure] = useState<Measure>("series");
   // The analysis aggregates the whole catalog, so it runs when asked to,
@@ -74,6 +79,7 @@ export default function AnalysisPage() {
   });
 
   const run = () => {
+    if (!groupBy) return;
     if (requested === groupBy) {
       void refetch();
     } else {
@@ -81,7 +87,12 @@ export default function AnalysisPage() {
     }
   };
 
-  const shownGroupBy = requested ?? groupBy;
+  const toggle = (d: Dimension) =>
+    setDims((prev) =>
+      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d],
+    );
+
+  const shownGroupBy = requested ?? groupBy ?? "job";
   const rows: Row[] = useMemo(
     () =>
       (data ?? []).map((r) => ({
@@ -198,24 +209,32 @@ export default function AnalysisPage() {
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <Select
-          value={groupBy}
-          onValueChange={(v) => setGroupBy(v as UnusedAnalysisGroupBy)}
+        <div
+          className="flex items-center gap-2"
+          role="group"
+          aria-label="Group by"
         >
-          <SelectTrigger className="sm:w-[200px]" aria-label="Group by">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="job">By job</SelectItem>
-            <SelectItem value="service">By service</SelectItem>
-            <SelectItem value="source">By source</SelectItem>
-            <SelectItem value="job,source">By job and source</SelectItem>
-            <SelectItem value="service,source">
-              By service and source
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <Button onClick={run} disabled={isFetching} className="cursor-pointer">
+          <span className="text-sm text-muted-foreground">Group by</span>
+          {DIMENSIONS.map((d) => (
+            <Button
+              key={d}
+              type="button"
+              size="sm"
+              variant={dims.includes(d) ? "default" : "outline"}
+              aria-pressed={dims.includes(d)}
+              onClick={() => toggle(d)}
+              className="cursor-pointer"
+            >
+              {dimensionTitle(d)}
+            </Button>
+          ))}
+        </div>
+        <Button
+          onClick={run}
+          disabled={isFetching || !groupBy}
+          title={groupBy ? undefined : "Pick at least one dimension"}
+          className="cursor-pointer"
+        >
           <Play className="h-4 w-4" />
           {isFetching ? "Analyzing…" : "Run analysis"}
         </Button>
@@ -282,7 +301,7 @@ export default function AnalysisPage() {
                 {measure === "series" &&
                   hasSeries &&
                   " Series are each source's head series; a metric shared by several groups counts under each."}
-                {shownGroupBy.endsWith(",source") &&
+                {shownGroupBy.includes(",source") &&
                   " A metric counts under every source reporting it."}
               </CardDescription>
             </CardHeader>

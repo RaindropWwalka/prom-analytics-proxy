@@ -340,8 +340,15 @@ export async function getSources(): Promise<string[]> {
   return body.data || [];
 }
 
+// Any non-empty combination of job, service and source, in that order.
 export type UnusedAnalysisGroupBy =
-  "job" | "service" | "source" | "job,source" | "service,source";
+  | "job"
+  | "service"
+  | "source"
+  | "job,service"
+  | "job,source"
+  | "service,source"
+  | "job,service,source";
 
 export interface UnusedAnalysisRow {
   job?: string;
