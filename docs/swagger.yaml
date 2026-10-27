@@ -1269,6 +1269,10 @@ paths:
         in: query
         name: job
         type: string
+      - description: Filter by the metadata source reporting the metric
+        in: query
+        name: source
+        type: string
       - description: Filter for unused metrics only
         in: query
         name: unused

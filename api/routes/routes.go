@@ -874,6 +874,7 @@ func (r *routes) queryExecutions(w http.ResponseWriter, req *http.Request) {
 // @Param type query string false "Filter by metric type (gauge, counter, histogram, summary)"
 // @Param usage query string false "Filter by usage type (all, used, unused)"
 // @Param job query string false "Filter by job label"
+// @Param source query string false "Filter by the metadata source reporting the metric"
 // @Param unused query bool false "Filter for unused metrics only"
 // @Success 200 {object} SeriesMetadataResponse
 // @Failure 400 {object} models.ErrorResponse
@@ -945,6 +946,7 @@ func (r *routes) seriesMetadata(w http.ResponseWriter, req *http.Request) {
 	if job := req.FormValue("job"); job != "" {
 		params.Job = job
 	}
+	params.Source = req.FormValue("source")
 
 	data, err := r.dbProvider.GetSeriesMetadata(req.Context(), params)
 	if err != nil {

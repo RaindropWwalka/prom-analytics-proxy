@@ -1252,6 +1252,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Filter by the metadata source reporting the metric",
+                        "name": "source",
+                        "in": "query"
+                    },
+                    {
                         "type": "boolean",
                         "description": "Filter for unused metrics only",
                         "name": "unused",

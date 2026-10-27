@@ -280,6 +280,8 @@ type SeriesMetadataParams struct {
 	Type      string
 	Usage     string
 	Job       string
+	// Source keeps the metrics a metadata source reports (metrics_catalog_sources).
+	Source string
 }
 
 func NormalizeSeriesMetadataUsage(usage string) string {
