@@ -1346,6 +1346,40 @@ func (p *PostGreSQLProvider) ListMetricsCatalogSources(ctx context.Context) ([]s
 	return ScanRows(rows, scanJob)
 }
 
+func (p *PostGreSQLProvider) UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem) error {
+	items = sortedUniqueServiceItems(items)
+	if len(items) == 0 {
+		return nil
+	}
+	names := make([]string, len(items))
+	services := make([]string, len(items))
+	jobs := make([]string, len(items))
+	for i, it := range items {
+		names[i], services[i], jobs[i] = it.Name, it.Service, it.Job
+	}
+	// One statement for the whole job, like UpsertMetricsCatalog: a shared
+	// exporter's job can carry thousands of (metric, service) pairs.
+	if _, err := p.db.ExecContext(ctx, `
+        INSERT INTO metrics_service_index(name, service, job, updated_at)
+        SELECT n, s, j, NOW()
+        FROM unnest($1::text[], $2::text[], $3::text[]) AS x(n, s, j)
+        ON CONFLICT(name, service, job) DO UPDATE SET
+          updated_at = EXCLUDED.updated_at
+    `, pq.Array(names), pq.Array(services), pq.Array(jobs)); err != nil {
+		return fmt.Errorf("upsert service index: %w", err)
+	}
+	return nil
+}
+
+// ListServices returns the distinct services known in metrics_service_index.
+func (p *PostGreSQLProvider) ListServices(ctx context.Context) ([]string, error) {
+	rows, err := ExecuteQuery(ctx, p.db, `SELECT DISTINCT service FROM metrics_service_index ORDER BY service`)
+	if err != nil {
+		return nil, err
+	}
+	return ScanRows(rows, scanJob)
+}
+
 // ListJobs returns the distinct list of jobs known in metrics_job_index
 func (p *PostGreSQLProvider) ListJobs(ctx context.Context) ([]string, error) {
 	rows, err := ExecuteQuery(ctx, p.db, `SELECT DISTINCT job FROM metrics_job_index ORDER BY job`)

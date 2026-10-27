@@ -1128,6 +1128,49 @@ func (p *SQLiteProvider) ListMetricsCatalogSources(ctx context.Context) ([]strin
 	return ScanRows(rows, scanJob)
 }
 
+func (p *SQLiteProvider) UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem) error {
+	items = sortedUniqueServiceItems(items)
+	if len(items) == 0 {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+        INSERT INTO metrics_service_index(name, service, job, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(name, service, job) DO UPDATE SET
+            updated_at = excluded.updated_at
+    `)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("prepare: %w", err)
+	}
+	defer CloseResource(stmt)
+	for _, it := range items {
+		if _, err := stmt.ExecContext(ctx, it.Name, it.Service, it.Job); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("exec: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+// ListServices returns the distinct services from metrics_service_index.
+func (p *SQLiteProvider) ListServices(ctx context.Context) ([]string, error) {
+	rows, err := ExecuteQuery(ctx, p.db, `SELECT DISTINCT service FROM metrics_service_index ORDER BY service`)
+	if err != nil {
+		return nil, err
+	}
+	return ScanRows(rows, scanJob)
+}
+
 // ListJobs returns the distinct list of jobs from metrics_job_index
 func (p *SQLiteProvider) ListJobs(ctx context.Context) ([]string, error) {
 	rows, err := ExecuteQuery(ctx, p.db, `SELECT DISTINCT job FROM metrics_job_index ORDER BY job`)

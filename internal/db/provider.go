@@ -36,6 +36,10 @@ type Provider interface {
 	RefreshMetricsUsageSummary(ctx context.Context, tr TimeRange) error
 	UpsertMetricsJobIndex(ctx context.Context, items []MetricJobIndexItem) error
 	ListJobs(ctx context.Context) ([]string, error)
+	// UpsertMetricsServiceIndex records which service of which job produces
+	// each metric.
+	UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem) error
+	ListServices(ctx context.Context) ([]string, error)
 	// UpsertMetricsCatalogSources records that source reported names. A
 	// (name, source) pair is inserted when new and its last_seen_at
 	// refreshed only once older than refreshBefore, so a pair confirmed
@@ -324,6 +328,12 @@ type MetricCatalogItem struct {
 type MetricJobIndexItem struct {
 	Name string
 	Job  string
+}
+
+type MetricServiceIndexItem struct {
+	Name    string
+	Service string
+	Job     string
 }
 
 type ListQueriesResult struct {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	promconfig "github.com/prometheus/common/config"
+	"github.com/prometheus/common/model"
 	"github.com/thanos-io/thanos/pkg/tracing/otlp"
 	yaml "gopkg.in/yaml.v3"
 )
@@ -173,6 +174,11 @@ type InventoryConfig struct {
 	JobIndexLabelTimeout  time.Duration `yaml:"job_index_label_timeout,omitempty"`
 	JobIndexPerJobTimeout time.Duration `yaml:"job_index_per_job_timeout,omitempty"`
 	JobIndexWorkers       int           `yaml:"job_index_workers,omitempty"`
+	// ServiceLabel, when set, has the job index also record which service
+	// of each job produces each metric - from the same per-job query, so at
+	// no extra upstream cost. For jobs such as a shared exporter that carry
+	// many services. Empty records jobs only.
+	ServiceLabel string `yaml:"service_label,omitempty"`
 }
 
 // MetadataSourceConfig is one Prometheus-compatible API the catalog step
@@ -280,6 +286,7 @@ var DefaultConfig = &Config{
 		PushMetricsUsageTimeout: 30 * time.Second,
 	},
 	Inventory: InventoryConfig{
+		ServiceLabel:                  "service",
 		Enabled:                       true,
 		MetadataSyncEnabled:           true,
 		MetadataMetricsNameOnly:       false,
@@ -572,6 +579,9 @@ func (c InventoryConfig) Validate() error {
 				names[src.DisplayName()] = i
 			}
 		}
+	}
+	if c.JobSyncEnabled && c.ServiceLabel != "" && !model.LabelName(c.ServiceLabel).IsValid() {
+		errs = append(errs, fmt.Errorf("inventory.service_label %q is not a valid label name", c.ServiceLabel))
 	}
 	// Without a worker there's nothing to pull jobs off the fan-out channel,
 	// and the step reports success having indexed nothing.

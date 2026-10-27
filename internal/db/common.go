@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -161,4 +162,21 @@ func groupCatalogSources(rows *sql.Rows) (map[string][]string, error) {
 		out[p.name] = append(out[p.name], p.source)
 	}
 	return out, nil
+}
+
+// sortedUniqueServiceItems de-duplicates and orders service index items by
+// their key, so a single-statement upsert never touches a row twice and
+// concurrent writers lock rows in the same order.
+func sortedUniqueServiceItems(items []MetricServiceIndexItem) []MetricServiceIndexItem {
+	out := slices.Clone(items)
+	slices.SortFunc(out, func(a, b MetricServiceIndexItem) int {
+		if c := strings.Compare(a.Name, b.Name); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.Service, b.Service); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Job, b.Job)
+	})
+	return slices.Compact(out)
 }

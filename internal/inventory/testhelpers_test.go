@@ -44,6 +44,7 @@ type fakePromAPI struct {
 
 	mu          sync.Mutex
 	queriedJobs []string // jobs Query was actually called for, in call order
+	queries     []string // the PromQL Query was called with, in call order
 	// labelStart and labelEnd are the range LabelValues was last asked for.
 	labelStart, labelEnd time.Time
 }
@@ -97,6 +98,7 @@ func (f *fakePromAPI) Query(ctx context.Context, query string, _ time.Time, _ ..
 	}
 	f.mu.Lock()
 	f.queriedJobs = append(f.queriedJobs, job)
+	f.queries = append(f.queries, query)
 	f.mu.Unlock()
 
 	if f.queryErr != nil && f.queryErrJobs[job] {
@@ -128,7 +130,8 @@ type fakeProvider struct {
 	// summaryFrom and summaryTo are the range the last refresh was given.
 	summaryFrom, summaryTo time.Time
 
-	jobIndexItems []db.MetricJobIndexItem
+	jobIndexItems     []db.MetricJobIndexItem
+	serviceIndexItems []db.MetricServiceIndexItem
 	// upsertCalls counts job-index upserts attempted, which is what tells a
 	// commit of nothing apart from no commit at all - jobIndexItems is empty
 	// either way.
@@ -180,6 +183,13 @@ func (f *fakeProvider) RefreshMetricsUsageSummary(ctx context.Context, tr db.Tim
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (f *fakeProvider) UpsertMetricsServiceIndex(_ context.Context, items []db.MetricServiceIndexItem) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.serviceIndexItems = append(f.serviceIndexItems, items...)
+	return nil
 }
 
 func (f *fakeProvider) UpsertMetricsJobIndex(ctx context.Context, items []db.MetricJobIndexItem) error {
