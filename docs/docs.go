@@ -36,7 +36,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "job (default), source, or job,source",
+                        "description": "job (default), service, source, job,source or service,source",
                         "name": "groupBy",
                         "in": "query"
                     },
@@ -44,6 +44,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Keep only this job",
                         "name": "job",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep only this service",
+                        "name": "service",
                         "in": "query"
                     },
                     {
@@ -1369,6 +1375,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Filter by the service producing the metric",
+                        "name": "service",
+                        "in": "query"
+                    },
+                    {
                         "type": "boolean",
                         "description": "Filter for unused metrics only",
                         "name": "unused",
@@ -1386,6 +1398,32 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/services": {
+            "get": {
+                "description": "Get the services the job index found producing metrics (inventory.service_label).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "metrics"
+                ],
+                "summary": "List services",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.JobsResponse"
                         }
                     },
                     "500": {
@@ -1754,6 +1792,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "job": {
+                    "type": "string"
+                },
+                "service": {
                     "type": "string"
                 },
                 "source": {

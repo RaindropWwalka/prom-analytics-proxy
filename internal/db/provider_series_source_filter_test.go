@@ -39,6 +39,14 @@ func testSeriesMetadataSourceFilter(t *testing.T, b testBackend) {
 	assert.Equal(t, []string{"m2"}, names(SeriesMetadataParams{Usage: SeriesMetadataUsageUnused, Source: "source-b"}))
 	assert.Equal(t, []string{"m1"}, names(SeriesMetadataParams{Usage: SeriesMetadataUsageUnused, Job: "a", Source: "source-a"}))
 	assert.Empty(t, names(SeriesMetadataParams{Usage: SeriesMetadataUsageAll, Source: "unknown"}))
+
+	require.NoError(t, p.UpsertMetricsServiceIndex(ctx, []MetricServiceIndexItem{
+		{Name: "m1", Service: "billing", Job: "a"}, {Name: "m2", Service: "payments", Job: "a"},
+	}))
+	assert.Equal(t, []string{"m1"}, names(SeriesMetadataParams{Usage: SeriesMetadataUsageAll, Service: "billing"}))
+	assert.Equal(t, []string{"m2"}, names(SeriesMetadataParams{Usage: SeriesMetadataUsageUnused, Service: "payments"}))
+	assert.Equal(t, []string{"m1"}, names(SeriesMetadataParams{Usage: SeriesMetadataUsageUnused, Job: "a", Service: "billing"}))
+	assert.Empty(t, names(SeriesMetadataParams{Usage: SeriesMetadataUsageAll, Service: "billing", Source: "source-b"}))
 }
 
 func TestPostgreSQL_GetSeriesMetadata_SourceFilter(t *testing.T) {

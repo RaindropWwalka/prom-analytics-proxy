@@ -221,6 +221,8 @@ definitions:
     properties:
       job:
         type: string
+      service:
+        type: string
       source:
         type: string
       total:
@@ -489,13 +491,17 @@ paths:
         per metadata source, or per job and source. Metrics not synced within the
         inventory time window are left out.
       parameters:
-      - description: job (default), source, or job,source
+      - description: job (default), service, source, job,source or service,source
         in: query
         name: groupBy
         type: string
       - description: Keep only this job
         in: query
         name: job
+        type: string
+      - description: Keep only this service
+        in: query
+        name: service
         type: string
       - description: Keep only this source
         in: query
@@ -1381,6 +1387,10 @@ paths:
         in: query
         name: source
         type: string
+      - description: Filter by the service producing the metric
+        in: query
+        name: service
+        type: string
       - description: Filter for unused metrics only
         in: query
         name: unused
@@ -1401,6 +1411,23 @@ paths:
           schema:
             $ref: '#/definitions/models.ErrorResponse'
       summary: Series metadata
+      tags:
+      - metrics
+  /api/v1/services:
+    get:
+      description: Get the services the job index found producing metrics (inventory.service_label).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.JobsResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: List services
       tags:
       - metrics
   /api/v1/sources:

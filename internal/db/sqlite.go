@@ -65,6 +65,10 @@ const sqliteSeriesMetadataCountSQL = `
                 SELECT 1 FROM metrics_catalog_sources src
                 WHERE src.name = c.name AND src.source = ?
           ))
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_service_index svc
+                WHERE svc.name = c.name AND svc.service = ?
+          ))
     `
 
 const sqliteSeriesMetadataBaseSQL = `
@@ -96,6 +100,10 @@ const sqliteSeriesMetadataBaseSQL = `
                 SELECT 1 FROM metrics_catalog_sources src
                 WHERE src.name = c.name AND src.source = ?
           ))
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_service_index svc
+                WHERE svc.name = c.name AND svc.service = ?
+          ))
     `
 
 const sqliteSeriesMetadataUnusedCountSQL = `
@@ -113,6 +121,10 @@ const sqliteSeriesMetadataUnusedCountSQL = `
           AND (? = '' OR EXISTS (
                 SELECT 1 FROM metrics_catalog_sources src
                 WHERE src.name = c.name AND src.source = ?
+          ))
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_service_index svc
+                WHERE svc.name = c.name AND svc.service = ?
           ))
     `
 
@@ -132,6 +144,10 @@ const sqliteSeriesMetadataUnusedBaseSQL = `
           AND (? = '' OR EXISTS (
                 SELECT 1 FROM metrics_catalog_sources src
                 WHERE src.name = c.name AND src.source = ?
+          ))
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_service_index svc
+                WHERE svc.name = c.name AND svc.service = ?
           ))
     `
 
@@ -153,6 +169,10 @@ const sqliteSeriesMetadataUnusedJobCountSQL = `
                 SELECT 1 FROM metrics_catalog_sources src
                 WHERE src.name = c.name AND src.source = ?
           ))
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_service_index svc
+                WHERE svc.name = c.name AND svc.service = ?
+          ))
     `
 
 const sqliteSeriesMetadataUnusedJobBaseSQL = `
@@ -173,6 +193,10 @@ const sqliteSeriesMetadataUnusedJobBaseSQL = `
           AND (? = '' OR EXISTS (
                 SELECT 1 FROM metrics_catalog_sources src
                 WHERE src.name = c.name AND src.source = ?
+          ))
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_service_index svc
+                WHERE svc.name = c.name AND svc.service = ?
           ))
     `
 
@@ -773,6 +797,7 @@ func (p *SQLiteProvider) GetSeriesMetadata(ctx context.Context, params SeriesMet
 		params.Usage, params.Usage,
 		params.Job, params.Job,
 		params.Source, params.Source,
+		params.Service, params.Service,
 	).Scan(&total); err != nil {
 		return PagedResult{}, fmt.Errorf("failed to count catalog: %w", err)
 	}
@@ -787,6 +812,7 @@ func (p *SQLiteProvider) GetSeriesMetadata(ctx context.Context, params SeriesMet
 		params.Usage, params.Usage,
 		params.Job, params.Job,
 		params.Source, params.Source,
+		params.Service, params.Service,
 		params.PageSize, (params.Page-1)*params.PageSize,
 	)
 	if err != nil {
@@ -823,6 +849,7 @@ func (p *SQLiteProvider) getSeriesMetadataUnused(ctx context.Context, params Ser
 		params.Filter, params.Filter, params.Filter,
 		params.Type, params.Type, params.Type, params.Type,
 		params.Source, params.Source,
+		params.Service, params.Service,
 	).Scan(&total); err != nil {
 		return PagedResult{}, fmt.Errorf("failed to count catalog: %w", err)
 	}
@@ -845,6 +872,7 @@ func (p *SQLiteProvider) getSeriesMetadataUnused(ctx context.Context, params Ser
 		params.Filter, params.Filter, params.Filter,
 		params.Type, params.Type, params.Type, params.Type,
 		params.Source, params.Source,
+		params.Service, params.Service,
 		params.PageSize, (params.Page-1)*params.PageSize,
 	)
 	if err != nil {
@@ -873,6 +901,7 @@ func (p *SQLiteProvider) getSeriesMetadataUnusedJobScoped(ctx context.Context, p
 		params.Filter, params.Filter, params.Filter,
 		params.Type, params.Type, params.Type, params.Type,
 		params.Source, params.Source,
+		params.Service, params.Service,
 	).Scan(&total); err != nil {
 		return PagedResult{}, fmt.Errorf("failed to count catalog: %w", err)
 	}
@@ -890,6 +919,7 @@ func (p *SQLiteProvider) getSeriesMetadataUnusedJobScoped(ctx context.Context, p
 		params.Filter, params.Filter, params.Filter,
 		params.Type, params.Type, params.Type, params.Type,
 		params.Source, params.Source,
+		params.Service, params.Service,
 		params.PageSize, (params.Page-1)*params.PageSize,
 	)
 	if err != nil {
