@@ -52,6 +52,12 @@ type Provider interface {
 	// that report it, sorted. Names no source reports are absent.
 	GetMetricsCatalogSources(ctx context.Context, names []string) (map[string][]string, error)
 	ListMetricsCatalogSources(ctx context.Context) ([]string, error)
+	// ReplaceMetricsCardinality makes series the whole of what's known about
+	// source's cardinality: metrics missing from it are dropped.
+	ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int) error
+	// GetMetricsCardinality returns, for each of names, its series count per
+	// source. Names no source counted are absent.
+	GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error)
 	// AnalyzeUnusedMetrics counts, per job and/or source, the catalog's
 	// metrics and how many of them are unused.
 	AnalyzeUnusedMetrics(ctx context.Context, params UnusedAnalysisParams) ([]UnusedAnalysisRow, error)

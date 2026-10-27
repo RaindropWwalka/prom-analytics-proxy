@@ -1120,6 +1120,63 @@ func (p *SQLiteProvider) UpsertMetricsCatalogSources(ctx context.Context, source
 	return nil
 }
 
+func (p *SQLiteProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int) error {
+	names, counts := cardinalityArrays(series)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	namesJSON, err := json.Marshal(names)
+	if err != nil {
+		return fmt.Errorf("marshal names: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+        DELETE FROM metrics_cardinality
+        WHERE source = ? AND name NOT IN (SELECT value FROM json_each(?))
+    `, source, string(namesJSON)); err != nil {
+		return fmt.Errorf("drop stale cardinality: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+        INSERT INTO metrics_cardinality(name, source, series, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(name, source) DO UPDATE SET
+            series = excluded.series,
+            updated_at = excluded.updated_at
+    `)
+	if err != nil {
+		return fmt.Errorf("prepare: %w", err)
+	}
+	defer CloseResource(stmt)
+	for i, name := range names {
+		if _, err := stmt.ExecContext(ctx, name, source, counts[i]); err != nil {
+			return fmt.Errorf("upsert cardinality: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (p *SQLiteProvider) GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error) {
+	if len(names) == 0 {
+		return map[string]map[string]int{}, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
+	args := make([]any, len(names))
+	for i, n := range names {
+		args[i] = n
+	}
+	rows, err := ExecuteQuery(ctx, p.db, `
+        SELECT name, source, series FROM metrics_cardinality
+        WHERE name IN (`+placeholders+`)
+    `, args...)
+	if err != nil {
+		return nil, err
+	}
+	return groupCardinality(rows)
+}
+
 func (p *SQLiteProvider) DeleteMetricsCatalogSourcesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

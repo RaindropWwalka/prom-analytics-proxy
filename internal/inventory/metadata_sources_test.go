@@ -279,3 +279,43 @@ func TestSyncer_NamesOnlySourceFillsTheCatalogDescribedSourcesDescribe(t *testin
 	assert.Equal(t, "gauge", got["up"].Type, "a described entry wins over a name-only one, whatever the order")
 	assert.Equal(t, db.MetricCatalogItem{Name: "only_in_names"}, got["only_in_names"])
 }
+
+func TestSyncer_RecordsEachSourcesCardinality(t *testing.T) {
+	provider := &fakeProvider{}
+	nameOnly := true
+	prom := &fakePromAPI{
+		meta: map[string][]v1.Metadata{"up": {{Type: "gauge"}}},
+		tsdb: v1.TSDBResult{SeriesCountByMetricName: []v1.Stat{{Name: "up", Value: 12}, {Name: "jvm_threads", Value: 40}}},
+	}
+	thanos := &fakePromAPI{jobs: []string{"up"}}
+	broken := &fakePromAPI{
+		meta:    map[string][]v1.Metadata{"up": {{Type: "gauge"}}},
+		tsdbErr: errors.New("status endpoint disabled"),
+	}
+	s := newSourcesSyncer(provider, false,
+		metadataSource{name: "prom", api: prom},
+		metadataSource{name: "thanos", api: thanos, nameOnly: &nameOnly},
+		metadataSource{name: "broken", api: broken})
+	s.cardinalityLimit = 1000
+
+	s.RunOnce(context.Background())
+
+	require.Equal(t, 1, provider.catalogCommits, "a failed TSDB status doesn't cost the catalog")
+	assert.Equal(t, map[string]map[string]int{"prom": {"up": 12, "jvm_threads": 40}}, provider.cardinality,
+		"only sources that answered are replaced, so a failure keeps the last numbers")
+	assert.Equal(t, 1, prom.tsdbCalls)
+	assert.Equal(t, "1", prom.tsdbLimit, "asked with a limit")
+	assert.Zero(t, thanos.tsdbCalls, "a name-only source has no TSDB status to give")
+	assert.Equal(t, 1, broken.tsdbCalls)
+}
+
+func TestSyncer_CardinalityOffReadsNoTSDBStatus(t *testing.T) {
+	provider := &fakeProvider{}
+	prom := &fakePromAPI{meta: map[string][]v1.Metadata{"up": {{Type: "gauge"}}}}
+	s := newSourcesSyncer(provider, false, metadataSource{name: "prom", api: prom})
+
+	s.RunOnce(context.Background())
+
+	assert.Zero(t, prom.tsdbCalls)
+	assert.Empty(t, provider.cardinality)
+}

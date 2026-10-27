@@ -180,3 +180,43 @@ func sortedUniqueServiceItems(items []MetricServiceIndexItem) []MetricServiceInd
 	})
 	return slices.Compact(out)
 }
+
+// cardinalityArrays flattens a series-per-metric map into parallel slices,
+// sorted by name so concurrent writers lock rows in the same order.
+func cardinalityArrays(series map[string]int) ([]string, []int64) {
+	names := make([]string, 0, len(series))
+	for name := range series {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	counts := make([]int64, len(names))
+	for i, name := range names {
+		counts[i] = int64(series[name])
+	}
+	return names, counts
+}
+
+// groupCardinality folds (name, source, series) rows into series per source
+// per name.
+func groupCardinality(rows *sql.Rows) (map[string]map[string]int, error) {
+	type row struct {
+		name, source string
+		series       int
+	}
+	all, err := ScanRows(rows, func(r *sql.Rows) (row, error) {
+		var x row
+		err := r.Scan(&x.name, &x.source, &x.series)
+		return x, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]map[string]int)
+	for _, x := range all {
+		if out[x.name] == nil {
+			out[x.name] = make(map[string]int)
+		}
+		out[x.name][x.source] = x.series
+	}
+	return out, nil
+}

@@ -527,6 +527,8 @@ inventory:
                              # metadata_step_timeout alone (default: 1m)
   metadata_source_refresh_interval: 24h # How long a "source reports metric" record stands
                              # before it is rewritten (default: 24h)
+  cardinality_limit: 1000    # Record each metadata source's N largest metrics by head series,
+                             # from /api/v1/status/tsdb (default: 1000; 0 = off)
   sync_interval: 10m         # How often to sync inventory (default: 10m)
   time_window: 720h          # Time window for usage analysis (default: 30 days)
   run_timeout: 300s          # Timeout for an entire sync run (default: 300s)

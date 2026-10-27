@@ -948,3 +948,11 @@ func (p *benchDBProvider) UpsertMetricsServiceIndex(ctx context.Context, items [
 func (p *benchDBProvider) ListServices(ctx context.Context) ([]string, error) {
 	return nil, nil
 }
+
+func (p *benchDBProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int) error {
+	return nil
+}
+
+func (p *benchDBProvider) GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error) {
+	return nil, nil
+}

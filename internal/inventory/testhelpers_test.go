@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"sync"
 	"time"
@@ -33,6 +34,13 @@ type fakePromAPI struct {
 	jobs       []string
 	labelErr   error
 
+	// tsdb is what TSDB answers; tsdbErr fails it instead. tsdbCalls counts
+	// calls, and tsdbLimit is the limit the last one asked for.
+	tsdb      v1.TSDBResult
+	tsdbErr   error
+	tsdbCalls int
+	tsdbLimit string
+
 	queryDelay time.Duration
 	// result, if set, is what Query returns instead of a single-sample
 	// vector - for driving what processJob makes of an unusual shape.
@@ -59,6 +67,14 @@ func (f *fakePromAPI) Metadata(ctx context.Context, _ string, _ string) (map[str
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+func (f *fakePromAPI) TSDB(_ context.Context, opts ...v1.Option) (v1.TSDBResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tsdbCalls++
+	f.tsdbLimit = fmt.Sprint(len(opts))
+	return f.tsdb, f.tsdbErr
 }
 
 func (f *fakePromAPI) LabelValues(ctx context.Context, _ string, _ []string, start, end time.Time, _ ...v1.Option) (model.LabelValues, v1.Warnings, v1.Infos, error) {
@@ -123,6 +139,8 @@ type fakeProvider struct {
 	// sources is which names each source was last recorded as reporting.
 	sources        map[string][]string
 	sourcesDeletes int
+	// cardinality is each source's last recorded series per metric.
+	cardinality map[string]map[string]int
 
 	summaryDelay     time.Duration // how long a real refresh would take
 	summaryCalls     int
@@ -158,6 +176,16 @@ func (f *fakeProvider) UpsertMetricsCatalogSources(_ context.Context, source str
 		f.sources = make(map[string][]string)
 	}
 	f.sources[source] = names
+	return nil
+}
+
+func (f *fakeProvider) ReplaceMetricsCardinality(_ context.Context, source string, series map[string]int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cardinality == nil {
+		f.cardinality = make(map[string]map[string]int)
+	}
+	f.cardinality[source] = series
 	return nil
 }
 

@@ -656,3 +656,11 @@ func (m *MockDBProvider) UpsertMetricsServiceIndex(ctx context.Context, items []
 func (m *MockDBProvider) ListServices(ctx context.Context) ([]string, error) {
 	return nil, nil
 }
+
+func (m *MockDBProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int) error {
+	return nil
+}
+
+func (m *MockDBProvider) GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error) {
+	return nil, nil
+}

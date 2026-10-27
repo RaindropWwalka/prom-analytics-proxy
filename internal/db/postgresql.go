@@ -1339,6 +1339,48 @@ func (p *PostGreSQLProvider) UpsertMetricsCatalogSources(ctx context.Context, so
 	return nil
 }
 
+func (p *PostGreSQLProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int) error {
+	names, counts := cardinalityArrays(series)
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+        DELETE FROM metrics_cardinality
+        WHERE source = $1 AND NOT (name = ANY($2::text[]))
+    `, source, pq.Array(names)); err != nil {
+		return fmt.Errorf("drop stale cardinality: %w", err)
+	}
+	if len(names) > 0 {
+		if _, err := tx.ExecContext(ctx, `
+            INSERT INTO metrics_cardinality(name, source, series, updated_at)
+            SELECT n, $1, c, NOW() AT TIME ZONE 'UTC'
+            FROM unnest($2::text[], $3::bigint[]) AS x(n, c)
+            ON CONFLICT(name, source) DO UPDATE SET
+              series = EXCLUDED.series,
+              updated_at = EXCLUDED.updated_at
+        `, source, pq.Array(names), pq.Array(counts)); err != nil {
+			return fmt.Errorf("upsert cardinality: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (p *PostGreSQLProvider) GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error) {
+	if len(names) == 0 {
+		return map[string]map[string]int{}, nil
+	}
+	rows, err := ExecuteQuery(ctx, p.db, `
+        SELECT name, source, series FROM metrics_cardinality
+        WHERE name = ANY($1::text[])
+    `, pq.Array(names))
+	if err != nil {
+		return nil, err
+	}
+	return groupCardinality(rows)
+}
+
 func (p *PostGreSQLProvider) DeleteMetricsCatalogSourcesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	res, err := p.db.ExecContext(ctx, `DELETE FROM metrics_catalog_sources WHERE last_seen_at < $1`, cutoff.UTC().Format(ISOTimeFormat))
 	if err != nil {

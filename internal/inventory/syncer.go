@@ -27,6 +27,7 @@ type Syncer struct {
 	metadataSourceWorkers         int
 	metadataSourceTimeout         time.Duration
 	metadataSourceRefreshInterval time.Duration
+	cardinalityLimit              uint64
 	timeWindow                    time.Duration
 	metadataLim                   string
 	metadataSyncEnabled           bool
@@ -210,6 +211,7 @@ func NewSyncer(dbp db.Provider, upstream string, cfg *config.Config, reg prometh
 		metadataSourceWorkers:         inv.MetadataSourceWorkers,
 		metadataSourceTimeout:         inv.MetadataSourceTimeout,
 		metadataSourceRefreshInterval: inv.MetadataSourceRefreshInterval,
+		cardinalityLimit:              inv.CardinalityLimit,
 		timeWindow:                    inv.TimeWindow,
 		metadataLim:                   lim,
 		metadataSyncEnabled:           inv.MetadataSyncEnabled,
@@ -368,6 +370,9 @@ func (s *Syncer) syncMetadataCatalog(ctx context.Context) error {
 type sourceCatalog struct {
 	source string
 	items  []db.MetricCatalogItem
+	// series is the source's head series per metric (its top
+	// cardinalityLimit), or nil when it wasn't read this cycle.
+	series map[string]int
 }
 
 // recordCatalogSources keeps track of which source reports which metric.
@@ -389,6 +394,14 @@ func (s *Syncer) recordCatalogSources(ctx context.Context, reported []sourceCata
 		}
 		if err := s.dbProvider.UpsertMetricsCatalogSources(ctx, r.source, names, now.Add(-s.metadataSourceRefreshInterval)); err != nil {
 			fail("inventory: record catalog sources", "source", r.source, "err", err)
+		}
+	}
+	for _, r := range reported {
+		if r.series == nil {
+			continue
+		}
+		if err := s.dbProvider.ReplaceMetricsCardinality(ctx, r.source, r.series); err != nil {
+			fail("inventory: record cardinality", "source", r.source, "err", err)
 		}
 	}
 	// A pair unconfirmed for a whole time_window is a metric its source no
@@ -419,12 +432,16 @@ func (s *Syncer) fetchCatalog(ctx context.Context, fetch func(context.Context, v
 	if workers <= 0 || workers > len(sources) {
 		workers = len(sources)
 	}
+	series := make([]map[string]int, len(sources))
 	next := make(chan int)
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Go(func() {
 			for i := range next {
 				results[i], errs[i] = s.fetchSource(ctx, sources[i], fetch)
+				if errs[i] == nil && s.readsCardinality(sources[i]) {
+					series[i] = s.fetchCardinality(ctx, sources[i])
+				}
 			}
 		})
 	}
@@ -450,7 +467,7 @@ func (s *Syncer) fetchCatalog(ctx context.Context, fetch func(context.Context, v
 	reported := make([]sourceCatalog, 0, len(sources)-len(failed))
 	for i, src := range sources {
 		if errs[i] == nil {
-			reported = append(reported, sourceCatalog{source: src.name, items: results[i]})
+			reported = append(reported, sourceCatalog{source: src.name, items: results[i], series: series[i]})
 		}
 	}
 	return reported, nil
@@ -490,6 +507,41 @@ func (s *Syncer) fetchSource(ctx context.Context, src metadataSource, fetch func
 	}
 	slog.Info("inventory: metadata source read", "source", src.name, "metrics", len(items), "took", took)
 	return items, nil
+}
+
+// readsCardinality tells whether src is asked for its TSDB status: only
+// configured metadata sources (the upstream may be a Thanos Querier) that
+// read metadata - a name-only source is one that has no TSDB of its own.
+func (s *Syncer) readsCardinality(src metadataSource) bool {
+	if s.cardinalityLimit == 0 || len(s.metadataSources) == 0 {
+		return false
+	}
+	nameOnly := s.metadataMetricsNameOnly
+	if src.nameOnly != nil {
+		nameOnly = *src.nameOnly
+	}
+	return !nameOnly
+}
+
+// fetchCardinality reads src's head series per metric, its top
+// cardinalityLimit. It returns nil on failure, logged: the catalog doesn't
+// depend on it, and the last cycle's numbers stay until a read succeeds.
+func (s *Syncer) fetchCardinality(ctx context.Context, src metadataSource) map[string]int {
+	if s.metadataSourceTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.metadataSourceTimeout)
+		defer cancel()
+	}
+	status, err := src.api.TSDB(ctx, v1.WithLimit(s.cardinalityLimit))
+	if err != nil {
+		slog.Warn("inventory: read cardinality", "source", src.name, "err", err)
+		return nil
+	}
+	series := make(map[string]int, len(status.SeriesCountByMetricName))
+	for _, stat := range status.SeriesCountByMetricName {
+		series[stat.Name] = int(stat.Value)
+	}
+	return series
 }
 
 // mergeCatalogItems keeps one item per metric name across sources. The

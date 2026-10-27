@@ -155,11 +155,16 @@ type InventoryConfig struct {
 	// writes; it has to stay well under TimeWindow, after which an
 	// unconfirmed record is deleted as a metric the source stopped reporting.
 	MetadataSourceRefreshInterval time.Duration `yaml:"metadata_source_refresh_interval,omitempty"`
-	SyncInterval                  time.Duration `yaml:"sync_interval,omitempty"`
-	TimeWindow                    time.Duration `yaml:"time_window,omitempty"`
-	RunTimeout                    time.Duration `yaml:"run_timeout,omitempty"`
-	MetadataStepTimeout           time.Duration `yaml:"metadata_step_timeout,omitempty"`
-	SummaryStepTimeout            time.Duration `yaml:"summary_step_timeout,omitempty"`
+	// CardinalityLimit is how many of each metadata source's largest metrics
+	// (by head series, from /api/v1/status/tsdb) the catalog step records;
+	// 0 records none. Name-only sources - a Thanos Querier has no TSDB
+	// status to give - are skipped.
+	CardinalityLimit    uint64        `yaml:"cardinality_limit,omitempty"`
+	SyncInterval        time.Duration `yaml:"sync_interval,omitempty"`
+	TimeWindow          time.Duration `yaml:"time_window,omitempty"`
+	RunTimeout          time.Duration `yaml:"run_timeout,omitempty"`
+	MetadataStepTimeout time.Duration `yaml:"metadata_step_timeout,omitempty"`
+	SummaryStepTimeout  time.Duration `yaml:"summary_step_timeout,omitempty"`
 	// JobSyncEnabled controls whether the syncer fetches job metadata from
 	// Prometheus and populates job_index. Set to false when you want to avoid heavy job queries.
 	JobSyncEnabled bool `yaml:"job_sync_enabled,omitempty"`
@@ -293,6 +298,7 @@ var DefaultConfig = &Config{
 		MetadataSourceWorkers:         4,
 		MetadataSourceTimeout:         time.Minute,
 		MetadataSourceRefreshInterval: 24 * time.Hour,
+		CardinalityLimit:              1000,
 		SyncInterval:                  10 * time.Minute,
 		TimeWindow:                    30 * 24 * time.Hour,
 		RunTimeout:                    300 * time.Second,
@@ -774,6 +780,7 @@ func logInventoryConfig(cfg *Config) {
 		"Inventory.MetadataSourceWorkers", cfg.Inventory.MetadataSourceWorkers,
 		"Inventory.MetadataSourceTimeout", cfg.Inventory.MetadataSourceTimeout,
 		"Inventory.MetadataSourceRefreshInterval", cfg.Inventory.MetadataSourceRefreshInterval,
+		"Inventory.CardinalityLimit", cfg.Inventory.CardinalityLimit,
 		"Inventory.SyncInterval", cfg.Inventory.SyncInterval,
 		"Inventory.TimeWindow", cfg.Inventory.TimeWindow,
 		"Inventory.RunTimeout", cfg.Inventory.RunTimeout,
