@@ -1906,7 +1906,13 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "last_seen_at": {
+                    "type": "string"
+                },
                 "name": {
+                    "type": "string"
+                },
+                "prom_link": {
                     "type": "string"
                 },
                 "serie": {

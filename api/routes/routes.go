@@ -1287,6 +1287,7 @@ func (r *routes) PushMetricsUsage(w http.ResponseWriter, req *http.Request) {
 			rulesUsage = append(rulesUsage, db.RulesUsage{
 				Serie:      name,
 				GroupName:  usage.GroupName,
+				PromLink:   usage.PromLink,
 				Name:       usage.Name,
 				Expression: usage.Expression,
 				Kind:       string(db.RuleUsageKindAlert),
@@ -1297,6 +1298,7 @@ func (r *routes) PushMetricsUsage(w http.ResponseWriter, req *http.Request) {
 			rulesUsage = append(rulesUsage, db.RulesUsage{
 				Serie:      name,
 				GroupName:  usage.GroupName,
+				PromLink:   usage.PromLink,
 				Name:       usage.Name,
 				Expression: usage.Expression,
 				Kind:       string(db.RuleUsageKindRecord),

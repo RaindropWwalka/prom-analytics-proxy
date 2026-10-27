@@ -41,7 +41,9 @@ type MetricUsageItem struct {
 	Expression string    `json:"expression,omitempty"`
 	Kind       string    `json:"kind,omitempty"`
 	Labels     []string  `json:"labels,omitempty"`
+	PromLink   string    `json:"prom_link,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
 }
 
 type MetricUsageResponse struct {

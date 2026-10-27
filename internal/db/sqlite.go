@@ -422,10 +422,10 @@ func (p *SQLiteProvider) InsertRulesUsage(ctx context.Context, rulesUsage []Rule
 
 	stmt, err := tx.PrepareContext(ctx, `
         INSERT INTO RulesUsage (
-            serie, group_name, name, expression, kind, labels, created_at, first_seen_at, last_seen_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            serie, group_name, name, expression, kind, labels, prom_link, created_at, first_seen_at, last_seen_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(serie, kind, group_name, name, expression, labels)
-        DO UPDATE SET last_seen_at = excluded.last_seen_at
+        DO UPDATE SET last_seen_at = excluded.last_seen_at, prom_link = excluded.prom_link
     `)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -445,6 +445,7 @@ func (p *SQLiteProvider) InsertRulesUsage(ctx context.Context, rulesUsage []Rule
 			rule.Expression,
 			rule.Kind,
 			string(labelsJSON),
+			rule.PromLink,
 			now,
 			now,
 			now,
@@ -506,6 +507,7 @@ func (p *SQLiteProvider) GetRulesUsage(ctx context.Context, params RulesUsagePar
                 expression,
                 kind,
                 labels,
+                prom_link,
                 created_at,
                 last_seen_at,
                 ROW_NUMBER() OVER (
@@ -529,7 +531,9 @@ func (p *SQLiteProvider) GetRulesUsage(ctx context.Context, params RulesUsagePar
             expression,
             kind,
             labels,
-            created_at
+            prom_link,
+            created_at,
+            last_seen_at
         FROM overlapped
         WHERE rank = 1
         ORDER BY

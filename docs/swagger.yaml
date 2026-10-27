@@ -358,7 +358,11 @@ definitions:
         items:
           type: string
         type: array
+      last_seen_at:
+        type: string
       name:
+        type: string
+      prom_link:
         type: string
       serie:
         type: string

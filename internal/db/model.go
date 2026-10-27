@@ -134,13 +134,16 @@ const (
 )
 
 type RulesUsage struct {
-	Serie      string    `json:"serie"`
-	GroupName  string    `json:"group_name"`
-	Name       string    `json:"name"`
-	Expression string    `json:"expression"`
-	Kind       string    `json:"kind"`
-	Labels     []string  `json:"labels"`
+	Serie      string   `json:"serie"`
+	GroupName  string   `json:"group_name"`
+	Name       string   `json:"name"`
+	Expression string   `json:"expression"`
+	Kind       string   `json:"kind"`
+	Labels     []string `json:"labels"`
+	// PromLink points at the rule in the Prometheus evaluating it.
+	PromLink   string    `json:"prom_link,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
 type DashboardUsage struct {

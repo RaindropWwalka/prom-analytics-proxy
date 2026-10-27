@@ -550,14 +550,14 @@ func (p *PostGreSQLProvider) InsertRulesUsage(ctx context.Context, rulesUsage []
 	if _, err = tx.ExecContext(ctx, `
         CREATE TEMP TABLE rules_usage_staging (
             serie TEXT, group_name TEXT, name TEXT, expression TEXT,
-            kind TEXT, labels JSONB, created_at TIMESTAMP
+            kind TEXT, labels JSONB, prom_link TEXT, created_at TIMESTAMP
         ) ON COMMIT DROP
     `); err != nil {
 		return fmt.Errorf("failed to create staging table: %w", err)
 	}
 
 	stmt, err := tx.PrepareContext(ctx,
-		`COPY rules_usage_staging (serie, group_name, name, expression, kind, labels, created_at) FROM STDIN`)
+		`COPY rules_usage_staging (serie, group_name, name, expression, kind, labels, prom_link, created_at) FROM STDIN`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare copy: %w", err)
 	}
@@ -577,6 +577,7 @@ func (p *PostGreSQLProvider) InsertRulesUsage(ctx context.Context, rulesUsage []
 			rule.Expression,
 			rule.Kind,
 			string(labelsJSON),
+			rule.PromLink,
 			now,
 		); err != nil {
 			_ = stmt.Close()
@@ -595,12 +596,12 @@ func (p *PostGreSQLProvider) InsertRulesUsage(ctx context.Context, rulesUsage []
 	// the ON CONFLICT target means concurrent calls with overlapping rows
 	// lock them in the same relative order regardless of staging order.
 	if _, err = tx.ExecContext(ctx, `
-        INSERT INTO RulesUsage (serie, group_name, name, expression, kind, labels, created_at, first_seen_at, last_seen_at)
-        SELECT serie, group_name, name, expression, kind, labels, created_at, created_at, created_at
+        INSERT INTO RulesUsage (serie, group_name, name, expression, kind, labels, prom_link, created_at, first_seen_at, last_seen_at)
+        SELECT serie, group_name, name, expression, kind, labels, prom_link, created_at, created_at, created_at
         FROM rules_usage_staging
         ORDER BY serie, kind, group_name, name, expression, labels::text
         ON CONFLICT (serie, kind, group_name, name, expression, labels)
-        DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
+        DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at, prom_link = EXCLUDED.prom_link
     `); err != nil {
 		return fmt.Errorf("failed to upsert from staging: %w", err)
 	}
@@ -657,6 +658,7 @@ func (p *PostGreSQLProvider) GetRulesUsage(ctx context.Context, params RulesUsag
                 expression,
                 kind,
                 labels,
+                prom_link,
                 created_at,
                 last_seen_at,
                 ROW_NUMBER() OVER (
@@ -680,7 +682,9 @@ func (p *PostGreSQLProvider) GetRulesUsage(ctx context.Context, params RulesUsag
             expression,
             kind,
             labels,
-            created_at
+            prom_link,
+            created_at,
+            last_seen_at
         FROM overlapped
         WHERE rank = 1
     `
