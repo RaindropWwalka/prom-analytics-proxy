@@ -21,6 +21,9 @@ interface MetricsExplorerHeaderProps {
   sources?: string[];
   sourceFilter?: string;
   onSourceFilterChange?: (value: string) => void;
+  services?: string[];
+  serviceFilter?: string;
+  onServiceFilterChange?: (value: string) => void;
 }
 
 export function MetricsExplorerHeader({
@@ -36,6 +39,9 @@ export function MetricsExplorerHeader({
   sources = [],
   sourceFilter = "",
   onSourceFilterChange,
+  services = [],
+  serviceFilter = "",
+  onServiceFilterChange,
 }: MetricsExplorerHeaderProps) {
   const producerOptions = producers.filter((p) => !!p && p.trim().length > 0);
   const currentProducerValue = producerOptions.includes(producerFilter)
@@ -97,6 +103,37 @@ export function MetricsExplorerHeader({
             ))}
           </SelectContent>
         </Select>
+        {services.length > 0 && (
+          <Select
+            value={services.includes(serviceFilter) ? serviceFilter : "__all__"}
+            onValueChange={(v) =>
+              onServiceFilterChange?.(v === "__all__" ? "" : v)
+            }
+          >
+            <SelectTrigger
+              className="w-full text-left lg:min-w-[130px] lg:max-w-[260px] lg:flex-[2]"
+              aria-label="Service"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <Filter className="h-4 w-4 shrink-0" />
+                <span
+                  className="truncate"
+                  title={serviceFilter || "All Services"}
+                >
+                  <SelectValue placeholder="All Services" />
+                </span>
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All Services</SelectItem>
+              {services.map((service) => (
+                <SelectItem key={service} value={service}>
+                  {service}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         {sources.length > 0 && (
           <Select
             value={sources.includes(sourceFilter) ? sourceFilter : "__all__"}

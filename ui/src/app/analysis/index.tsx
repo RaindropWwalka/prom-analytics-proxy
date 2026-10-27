@@ -38,6 +38,7 @@ import { DataTable, DataTableColumnHeader } from "@/components/data-table";
 import {
   catalogLink,
   groupLabel,
+  groupTitle,
   totals,
   unusedPercent,
 } from "./analysis-utils";
@@ -90,13 +91,7 @@ export default function AnalysisPage() {
       header: ({ column }) => (
         <DataTableColumnHeader
           column={column}
-          title={
-            shownGroupBy === "job"
-              ? "Job"
-              : shownGroupBy === "source"
-                ? "Source"
-                : "Job @ Source"
-          }
+          title={groupTitle(shownGroupBy)}
         />
       ),
       cell: ({ row }) => (
@@ -162,8 +157,12 @@ export default function AnalysisPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="job">By job</SelectItem>
+            <SelectItem value="service">By service</SelectItem>
             <SelectItem value="source">By source</SelectItem>
             <SelectItem value="job,source">By job and source</SelectItem>
+            <SelectItem value="service,source">
+              By service and source
+            </SelectItem>
           </SelectContent>
         </Select>
         <Button onClick={run} disabled={isFetching} className="cursor-pointer">
@@ -178,9 +177,9 @@ export default function AnalysisPage() {
 
       {data && rows.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          Nothing to analyze. Grouping by job needs the job index
-          (inventory.job_sync_enabled), and by source needs
-          inventory.metadata_sources.
+          Nothing to analyze. Grouping by job or service needs the job index
+          (inventory.job_sync_enabled, with inventory.service_label for
+          services), and by source needs inventory.metadata_sources.
         </p>
       )}
 
@@ -201,8 +200,8 @@ export default function AnalysisPage() {
               <CardDescription>
                 Top {Math.min(CHART_GROUPS, rows.length)} groups by unused
                 metrics.
-                {shownGroupBy === "job,source" &&
-                  " A metric of a job counts under every source reporting it."}
+                {shownGroupBy.endsWith(",source") &&
+                  " A metric counts under every source reporting it."}
               </CardDescription>
             </CardHeader>
             <CardContent>

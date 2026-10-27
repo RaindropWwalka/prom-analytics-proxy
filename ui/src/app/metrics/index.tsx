@@ -7,10 +7,11 @@ import { LoadingState } from "./loading";
 import { useDebounce } from "@/hooks/use-debounce";
 
 // initialFilters reads filters a link can open the catalog with, as the
-// unused-metrics analysis does: ?usage=unused&job=<job>&source=<source>.
+// unused-metrics analysis does: ?usage=unused&job=<job>&service=<service>&source=<source>.
 function initialFilters(): {
   usage: "all" | "used" | "unused";
   job: string;
+  service: string;
   source: string;
 } {
   const params = new URLSearchParams(window.location.search);
@@ -18,6 +19,7 @@ function initialFilters(): {
   return {
     usage: usage === "used" || usage === "unused" ? usage : "all",
     job: params.get("job") ?? "",
+    service: params.get("service") ?? "",
     source: params.get("source") ?? "",
   };
 }
@@ -31,6 +33,7 @@ export default function MetricsExplorer() {
   );
   const [producerFilter, setProducerFilter] = useState<string>(initial.job);
   const [sourceFilter, setSourceFilter] = useState<string>(initial.source);
+  const [serviceFilter, setServiceFilter] = useState<string>(initial.service);
   const [tableState, setTableState] = useState<TableState>({
     page: 1,
     pageSize: 10,
@@ -49,6 +52,7 @@ export default function MetricsExplorer() {
     usageFilter,
     producerFilter,
     sourceFilter,
+    serviceFilter,
   );
 
   if (isLoading) {
@@ -83,6 +87,9 @@ export default function MetricsExplorer() {
         sources={data.sources}
         sourceFilter={sourceFilter}
         onSourceFilterChange={setSourceFilter}
+        services={data.services}
+        serviceFilter={serviceFilter}
+        onServiceFilterChange={setServiceFilter}
       />
       <MetricsTable
         metrics={data.metrics}

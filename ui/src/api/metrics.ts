@@ -55,6 +55,7 @@ interface ApiConfig {
     metricUsage: string;
     producers: string;
     sources: string;
+    services: string;
     unusedAnalysis: string;
   };
 }
@@ -72,6 +73,7 @@ interface FetchOptions {
   usage?: "all" | "used" | "unused";
   job?: string;
   source?: string;
+  service?: string;
 }
 
 const API_CONFIG: ApiConfig = {
@@ -87,6 +89,7 @@ const API_CONFIG: ApiConfig = {
     metricUsage: "/api/v1/serieUsage",
     producers: "/api/v1/jobs",
     sources: "/api/v1/sources",
+    services: "/api/v1/services",
     unusedAnalysis: "/api/v1/analysis/unused",
   },
 };
@@ -164,6 +167,7 @@ async function fetchApiData<T>(
       : {}),
     ...(job ? { job } : {}),
     ...(options.source ? { source: options.source } : {}),
+    ...(options.service ? { service: options.service } : {}),
   });
 
   try {
@@ -198,6 +202,7 @@ export async function getSeriesMetadata(
   usage: "all" | "used" | "unused" = "all",
   job?: string,
   source?: string,
+  service?: string,
 ): Promise<PagedResult<MetricMetadata>> {
   return withErrorHandling(
     () =>
@@ -213,6 +218,7 @@ export async function getSeriesMetadata(
           usage,
           job,
           source,
+          service,
         },
       ),
     DEFAULT_ERROR_VALUES.seriesMetadata,
@@ -334,10 +340,12 @@ export async function getSources(): Promise<string[]> {
   return body.data || [];
 }
 
-export type UnusedAnalysisGroupBy = "job" | "source" | "job,source";
+export type UnusedAnalysisGroupBy =
+  "job" | "service" | "source" | "job,source" | "service,source";
 
 export interface UnusedAnalysisRow {
   job?: string;
+  service?: string;
   source?: string;
   total: number;
   unused: number;
@@ -355,5 +363,15 @@ export async function analyzeUnused(
   if (!res.ok)
     throw new Error(`Failed to analyze unused metrics: ${res.status}`);
   const body = (await res.json()) as { data: UnusedAnalysisRow[] };
+  return body.data || [];
+}
+
+// getServices lists the services the job index found producing metrics.
+export async function getServices(): Promise<string[]> {
+  const res = await fetch(
+    `${API_CONFIG.baseUrl}${API_CONFIG.endpoints.services}`,
+  );
+  if (!res.ok) throw new Error(`Failed to fetch services: ${res.status}`);
+  const body = (await res.json()) as { data: string[] };
   return body.data || [];
 }
