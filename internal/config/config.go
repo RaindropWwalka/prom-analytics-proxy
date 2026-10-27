@@ -37,6 +37,9 @@ type Config struct {
 	// by the Prometheus they came from, so the same job scraped by several
 	// counts once per Prometheus. Empty groups by job alone.
 	ProducersSourceLabel string `yaml:"producers_source_label,omitempty"`
+	// ProducersServiceLabel splits a job's producers further by service,
+	// for jobs that scrape many applications. Empty doesn't split.
+	ProducersServiceLabel string `yaml:"producers_service_label,omitempty"`
 }
 
 type QueryProcessing struct {
@@ -260,7 +263,8 @@ type LeaderElectionConfig struct {
 }
 
 var DefaultConfig = &Config{
-	ProducersSourceLabel: "prometheus",
+	ProducersSourceLabel:  "prometheus",
+	ProducersServiceLabel: "service",
 	CORS: CORSConfig{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},

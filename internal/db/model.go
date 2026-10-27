@@ -111,7 +111,10 @@ type MetricProducersResult struct {
 	// Source is the Prometheus the series came from, as told by the
 	// external label named by producers_source_label; empty without one.
 	Source string `json:"source,omitempty"`
-	Series int    `json:"series"`
+	// Service is the series' producers_service_label, when it has one: a
+	// job such as a shared JMX exporter can carry many services.
+	Service string `json:"service,omitempty"`
+	Series  int    `json:"series"`
 }
 
 type MetricUsageStatics struct {

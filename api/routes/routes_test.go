@@ -645,12 +645,28 @@ func TestProducersOf_SplitsAJobByTheSourceLabel(t *testing.T) {
 		{Job: "api", Source: "", Series: 1},
 		{Job: "api", Source: "source-b", Series: 1},
 		{Job: "node", Source: "source-b", Series: 1},
-	}, producersOf(series, "prometheus"))
+	}, producersOf(series, "prometheus", ""))
 
 	assert.Equal(t, []db.MetricProducersResult{
 		{Job: "node", Series: 3},
 		{Job: "api", Series: 2},
-	}, producersOf(series, ""), "without a source label producers are per job, as before")
+	}, producersOf(series, "", ""), "without a source label producers are per job, as before")
+}
+
+func TestProducersOf_SplitsAJobByService(t *testing.T) {
+	t.Parallel()
+	series := []model.LabelSet{
+		{"job": "jmx", "service": "billing"},
+		{"job": "jmx", "service": "billing"},
+		{"job": "jmx", "service": "payments"},
+		{"job": "jmx"},
+	}
+
+	assert.Equal(t, []db.MetricProducersResult{
+		{Job: "jmx", Service: "billing", Series: 2},
+		{Job: "jmx", Service: "", Series: 1},
+		{Job: "jmx", Service: "payments", Series: 1},
+	}, producersOf(series, "", "service"))
 }
 
 // metadataByNameProvider serves one catalog entry and its sources.

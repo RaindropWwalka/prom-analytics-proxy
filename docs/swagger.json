@@ -1438,6 +1438,10 @@
                 "series": {
                     "type": "integer"
                 },
+                "service": {
+                    "description": "Service is the series' producers_service_label, when it has one: a\njob such as a shared JMX exporter can carry many services.",
+                    "type": "string"
+                },
                 "source": {
                     "description": "Source is the Prometheus the series came from, as told by the\nexternal label named by producers_source_label; empty without one.",
                     "type": "string"

@@ -17,6 +17,7 @@ memory_limit:
 metadata_limit: 0 # The maximum number of metric metadata entries to retrieve from the upstream prometheus API. (default 0 which means no limit)
 series_limit: 0 # The maximum number of series to retrieve from the upstream prometheus API. (default 0 which means no limit)
 producers_source_label: prometheus # Series label naming the Prometheus a series came from; splits a metric's producers per Prometheus ("" = per job only)
+producers_service_label: service # Series label splitting a job's producers per service, for jobs scraping many apps ("" = no split)
 
 # Database
 database:

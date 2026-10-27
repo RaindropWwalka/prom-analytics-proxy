@@ -52,6 +52,7 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
       ].sort() as string[],
     [allProducers],
   );
+  const hasServices = allProducers.some((p) => !!p.service);
   const producers = React.useMemo(
     () =>
       sourceFilter === ALL_SOURCES
@@ -87,6 +88,17 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
           <div className="font-medium">{row.getValue("job")}</div>
         ),
       },
+      ...(hasServices
+        ? [
+            {
+              accessorKey: "service",
+              header: "Service",
+              cell: ({ row }) => (
+                <div className="truncate">{row.original.service || "—"}</div>
+              ),
+            } satisfies LegacyColumnDef<Producer>,
+          ]
+        : []),
       ...(sources.length > 0
         ? [
             {
@@ -137,7 +149,7 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
         },
       },
     ],
-    [totalSeries, sources.length],
+    [totalSeries, sources.length, hasServices],
   );
 
   if (isLoading) {

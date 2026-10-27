@@ -1057,21 +1057,22 @@ func (r *routes) GetMetricStatistics(w http.ResponseWriter, req *http.Request) {
 
 	statistics.SerieCount = len(series)
 	statistics.LabelCount = len(labels)
-	sourceLabel := ""
+	var sourceLabel, serviceLabel string
 	if r.config != nil {
-		sourceLabel = r.config.ProducersSourceLabel
+		sourceLabel, serviceLabel = r.config.ProducersSourceLabel, r.config.ProducersServiceLabel
 	}
-	statistics.Producers = producersOf(series, sourceLabel)
+	statistics.Producers = producersOf(series, sourceLabel, serviceLabel)
 
 	writeJSONResponse(req, w, statistics)
 }
 
-// producersOf counts a metric's series per job and, when sourceLabel is set,
-// per Prometheus too: the same job scraped by several Prometheus is several
-// producers. Series without a job aren't attributed to anyone. Largest first,
-// then by source and job, so the order is stable.
-func producersOf(series []model.LabelSet, sourceLabel string) []db.MetricProducersResult {
-	type key struct{ source, job string }
+// producersOf counts a metric's series per job and, when sourceLabel and
+// serviceLabel are set, per Prometheus and per service too: the same job
+// scraped by several Prometheus, or one exporter job carrying many services,
+// is several producers. Series without a job aren't attributed to anyone.
+// Largest first, then by source, job and service, so the order is stable.
+func producersOf(series []model.LabelSet, sourceLabel, serviceLabel string) []db.MetricProducersResult {
+	type key struct{ source, job, service string }
 	counts := make(map[key]int)
 	for _, serie := range series {
 		job, ok := serie["job"]
@@ -1082,11 +1083,14 @@ func producersOf(series []model.LabelSet, sourceLabel string) []db.MetricProduce
 		if sourceLabel != "" {
 			k.source = string(serie[model.LabelName(sourceLabel)])
 		}
+		if serviceLabel != "" {
+			k.service = string(serie[model.LabelName(serviceLabel)])
+		}
 		counts[k]++
 	}
 	producers := make([]db.MetricProducersResult, 0, len(counts))
 	for k, n := range counts {
-		producers = append(producers, db.MetricProducersResult{Job: k.job, Source: k.source, Series: n})
+		producers = append(producers, db.MetricProducersResult{Job: k.job, Source: k.source, Service: k.service, Series: n})
 	}
 	sort.Slice(producers, func(i, j int) bool {
 		a, b := producers[i], producers[j]
@@ -1096,7 +1100,10 @@ func producersOf(series []model.LabelSet, sourceLabel string) []db.MetricProduce
 		if a.Source != b.Source {
 			return a.Source < b.Source
 		}
-		return a.Job < b.Job
+		if a.Job != b.Job {
+			return a.Job < b.Job
+		}
+		return a.Service < b.Service
 	})
 	return producers
 }

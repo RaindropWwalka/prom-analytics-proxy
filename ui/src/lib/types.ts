@@ -92,6 +92,8 @@ export interface Producer {
   job: string;
   // The Prometheus the series came from; absent when not split by source.
   source?: string;
+  // The service within the job, for jobs carrying many (e.g. a JMX exporter).
+  service?: string;
   series: number;
 }
 
