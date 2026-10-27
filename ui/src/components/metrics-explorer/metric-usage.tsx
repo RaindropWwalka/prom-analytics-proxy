@@ -373,7 +373,7 @@ export default function MetricUsage({
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="queries" className="w-full">
-          <TabsList className="flex bg-gray-100 rounded-lg overflow-hidden w-full">
+          <TabsList className="flex bg-muted rounded-lg overflow-hidden w-full">
             <TabsTrigger value="queries" className="flex-1 py-3 px-5">
               Queries
             </TabsTrigger>

@@ -199,7 +199,7 @@ export default function QueriesPage() {
           open={!!selectedQuery}
           onOpenChange={() => setSelectedQuery(null)}
         >
-          <SheetContent className="w-[1200px] sm:max-w-[1200px]">
+          <SheetContent className="w-full sm:max-w-[min(1200px,95vw)]">
             <SheetHeader>
               <SheetTitle>Query Fingerprint Details</SheetTitle>
               <SheetDescription>

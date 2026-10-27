@@ -28,7 +28,7 @@ export default function MetricsDetails() {
       {/* Tabs */}
       <div className="mt-6">
         <Tabs defaultValue="performance">
-          <TabsList className="flex bg-gray-100 rounded-lg overflow-hidden">
+          <TabsList className="flex bg-muted rounded-lg overflow-hidden">
             <TabsTrigger value="performance" className="flex-1 py-3 px-5">
               Performance
             </TabsTrigger>
