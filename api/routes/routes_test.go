@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/nicolastakashi/prom-analytics-proxy/internal/db"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSeriesMetadata_DBBacked(t *testing.T) {
@@ -555,4 +557,73 @@ func TestQueryThroughput_BucketTimesAreRFC3339UTC(t *testing.T) {
 		}
 	}
 	assert.Equal(t, []string{"2026-01-02T10:15:00Z"}, counted)
+}
+
+// sourcesProvider serves a fixed series-metadata page and the sources
+// reporting it.
+type sourcesProvider struct {
+	db.Provider
+	page       []models.MetricMetadata
+	sources    map[string][]string
+	sourcesErr error
+}
+
+func (p *sourcesProvider) GetSeriesMetadata(context.Context, db.SeriesMetadataParams) (db.PagedResult, error) {
+	return db.PagedResult{Total: len(p.page), TotalPages: 1, Data: p.page}, nil
+}
+
+func (p *sourcesProvider) GetMetricsCatalogSources(context.Context, []string) (map[string][]string, error) {
+	return p.sources, p.sourcesErr
+}
+
+func (p *sourcesProvider) ListMetricsCatalogSources(context.Context) ([]string, error) {
+	return []string{"source-a", "source-b"}, nil
+}
+
+func getSeriesMetadataPage(t *testing.T, p db.Provider) []models.MetricMetadata {
+	t.Helper()
+	w := httptest.NewRecorder()
+	newTestRouter(t, p).ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/seriesMetadata", nil))
+	require.Equal(t, 200, w.Code, w.Body.String())
+	var body struct {
+		Data []models.MetricMetadata `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	return body.Data
+}
+
+func TestSeriesMetadata_AttachesSources(t *testing.T) {
+	t.Parallel()
+	p := &sourcesProvider{
+		page:    []models.MetricMetadata{{Name: "up"}, {Name: "local_only"}},
+		sources: map[string][]string{"up": {"source-a", "source-b"}},
+	}
+
+	page := getSeriesMetadataPage(t, p)
+
+	require.Len(t, page, 2)
+	assert.Equal(t, []string{"source-a", "source-b"}, page[0].Sources)
+	assert.Empty(t, page[1].Sources)
+}
+
+func TestSeriesMetadata_ServesThePageWhenSourcesCannotBeRead(t *testing.T) {
+	t.Parallel()
+	p := &sourcesProvider{
+		page:       []models.MetricMetadata{{Name: "up"}},
+		sourcesErr: errors.New("db down"),
+	}
+
+	page := getSeriesMetadataPage(t, p)
+
+	require.Len(t, page, 1)
+	assert.Equal(t, "up", page[0].Name)
+	assert.Empty(t, page[0].Sources)
+}
+
+func TestListSources(t *testing.T) {
+	t.Parallel()
+	w := httptest.NewRecorder()
+	newTestRouter(t, &sourcesProvider{}).ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/sources", nil))
+	require.Equal(t, 200, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"data":["source-a","source-b"]}`, w.Body.String())
 }

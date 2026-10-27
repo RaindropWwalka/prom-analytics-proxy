@@ -31,6 +31,7 @@ Settled this way, `run_timeout` is a true bound on one whole cycle rather than o
 | `metadata_metrics_name_only` | — (YAML only) | `false` | Which source step 1 uses |
 | `metadata_sources` | — (YAML only) | none | Where step 1 reads from instead of the upstream — see [Metadata sources](#metadata-sources) |
 | `metadata_source_workers` | — (YAML only) | `4` | How many `metadata_sources` step 1 reads at once |
+| `metadata_source_refresh_interval` | — (YAML only) | `24h` | How long a record of a source reporting a metric stands before step 1 rewrites it — must be shorter than `time_window` |
 | `metadata_source_timeout` | — (YAML only) | `1m` | Bounds one source's read, nested inside `metadata_step_timeout`; `0s` leaves each read bounded by `metadata_step_timeout` alone |
 | `sync_interval` | `-inventory-sync-interval` | `10m` | Time between cycles (jittered up to 20%, so replicas restarting together don't all sync in lockstep) |
 | `time_window` | `-inventory-time-window` | `720h` (30d) | Lookback window for the usage-summary refresh and job-index queries |
@@ -50,8 +51,10 @@ Step 1 reads the upstream by default. That doesn't work when the upstream can't 
 ```yaml
 inventory:
   metadata_sources:
-  - url: http://prometheus.monitoring.svc:9090
-  - url: https://prometheus.other-cluster.example.com
+  - name: local
+    url: http://prometheus.monitoring.svc:9090
+  - name: other-cluster
+    url: https://prometheus.other-cluster.example.com
     basic_auth:
       username: reader
       password_file: /etc/secrets/prometheus-password
@@ -59,13 +62,16 @@ inventory:
 
 Each entry is a `url` plus the HTTP client block Prometheus itself uses (`basic_auth`, `authorization`, `oauth2`, `tls_config`, `proxy_url`, ...). Sources are read in config order, `metadata_source_workers` at a time — so a long list doesn't land every response in memory at once — all within the one `metadata_step_timeout`; `metadata_source_timeout`, when set, bounds each read, so a source that hangs gives up its worker instead of holding it until the step times out and starving the sources queued behind it. Size `metadata_step_timeout` for the sources one worker takes in turn, not for a single read. The results are merged — for a metric several sources know, the first source in config order that has its type wins, so a source without metadata for it never blanks out one that has it — and the merged catalog is committed in one upsert. A source that fails costs only its own metrics: the step still commits what the others returned, and fails only if none answered. Every source's outcome is logged as soon as it has one — `inventory: metadata source read` with how many metrics it returned and how long it took, or `inventory: metadata source failed` with the error, a source timeout named as such — rather than once the step ends, which with tens of sources can be many minutes later; each failure is also counted in `inventory_metadata_source_failure_total`.
 
+Step 1 also records which source reports which metric, in `metrics_catalog_sources` — one row per (metric, source), under the source's `name` (its URL, password redacted, when unset; names must be unique). The API returns them as `sources` on every `/api/v1/seriesMetadata` row, and lists every source that reports anything at `/api/v1/sources`. With tens of sources each reporting tens of thousands of metrics, rewriting every row every cycle would dwarf the catalog write itself, so a row is only written when it's new or when it was last confirmed more than `metadata_source_refresh_interval` ago; a row left unconfirmed for a whole `time_window` is a metric its source stopped reporting, and is deleted. These writes happen after the catalog has committed, within the same `metadata_step_timeout`; a failure is logged and counted in `inventory_catalog_sources_failure_total` but doesn't fail the step. Nothing is recorded when step 1 reads the upstream.
+
 ### Metrics
 
 - `inventory_sync_duration_seconds` (histogram) — wall time of one `RunOnce` call, observed once regardless of outcome.
 - `inventory_sync_success_total` / `inventory_sync_failure_total` (counters) — steps 1–2's outcome only; step 3 isn't reflected here.
 - `inventory_catalog_summary_mismatch_total` (counter) — the catalog-committed-but-summary-failed partial-failure case specifically.
 - `inventory_job_index_failure_total` (counter) — step 3 failed, so the index is stale for the jobs it couldn't reach, while the run itself still counted as a success. Alert on this rather than on the success counter, which by design says nothing about step 3.
-- `inventory_metadata_source_failure_total` (counter, label `source`) — a `metadata_sources` entry couldn't be read in a cycle's step 1. The catalog was still committed from the others unless every source failed, in which case the run is counted as a failure too. The label is the source's URL with any password redacted.
+- `inventory_metadata_source_failure_total` (counter, label `source`) — a `metadata_sources` entry couldn't be read in a cycle's step 1. The catalog was still committed from the others unless every source failed, in which case the run is counted as a failure too. The label is the source's `name`.
+- `inventory_catalog_sources_failure_total` (counter) — recording which source reports which metric failed after the catalog committed; the `sources` the API shows are stale until a later cycle succeeds.
 
 ## Retention worker
 

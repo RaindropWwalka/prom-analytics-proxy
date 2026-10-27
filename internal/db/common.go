@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
+	"slices"
 	"time"
 )
 
@@ -133,4 +134,31 @@ func GetInterval(from, to time.Time, dialect string) string {
 	default:
 		return "+1 days"
 	}
+}
+
+// sortedUniqueNames is what a single-statement upsert keyed by name needs:
+// no name twice, and every writer locking rows in the same order.
+func sortedUniqueNames(names []string) []string {
+	out := slices.Clone(names)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// groupCatalogSources folds (name, source) rows, ordered by name then
+// source, into each name's sorted list of sources.
+func groupCatalogSources(rows *sql.Rows) (map[string][]string, error) {
+	type pair struct{ name, source string }
+	pairs, err := ScanRows(rows, func(r *sql.Rows) (pair, error) {
+		var p pair
+		err := r.Scan(&p.name, &p.source)
+		return p, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]string)
+	for _, p := range pairs {
+		out[p.name] = append(out[p.name], p.source)
+	}
+	return out, nil
 }

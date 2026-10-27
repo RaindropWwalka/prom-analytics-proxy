@@ -141,11 +141,16 @@ type InventoryConfig struct {
 	// times out. Zero leaves each read bounded by MetadataStepTimeout alone.
 	// Defaults to a minute: a healthy Prometheus answers in seconds.
 	MetadataSourceTimeout time.Duration `yaml:"metadata_source_timeout,omitempty"`
-	SyncInterval          time.Duration `yaml:"sync_interval,omitempty"`
-	TimeWindow            time.Duration `yaml:"time_window,omitempty"`
-	RunTimeout            time.Duration `yaml:"run_timeout,omitempty"`
-	MetadataStepTimeout   time.Duration `yaml:"metadata_step_timeout,omitempty"`
-	SummaryStepTimeout    time.Duration `yaml:"summary_step_timeout,omitempty"`
+	// MetadataSourceRefreshInterval is how long a metric's record of being
+	// reported by a source stands before it is rewritten. Shorter costs more
+	// writes; it has to stay well under TimeWindow, after which an
+	// unconfirmed record is deleted as a metric the source stopped reporting.
+	MetadataSourceRefreshInterval time.Duration `yaml:"metadata_source_refresh_interval,omitempty"`
+	SyncInterval                  time.Duration `yaml:"sync_interval,omitempty"`
+	TimeWindow                    time.Duration `yaml:"time_window,omitempty"`
+	RunTimeout                    time.Duration `yaml:"run_timeout,omitempty"`
+	MetadataStepTimeout           time.Duration `yaml:"metadata_step_timeout,omitempty"`
+	SummaryStepTimeout            time.Duration `yaml:"summary_step_timeout,omitempty"`
 	// JobSyncEnabled controls whether the syncer fetches job metadata from
 	// Prometheus and populates job_index. Set to false when you want to avoid heavy job queries.
 	JobSyncEnabled bool `yaml:"job_sync_enabled,omitempty"`
@@ -167,6 +172,10 @@ type InventoryConfig struct {
 // Prometheus uses for its own clients, so basic_auth, authorization,
 // tls_config and proxy settings read the way they do there.
 type MetadataSourceConfig struct {
+	// Name is what the source is recorded and shown as - see
+	// metrics_catalog_sources. Defaults to the URL, with any password
+	// redacted.
+	Name             string                      `yaml:"name,omitempty"`
 	URL              string                      `yaml:"url"`
 	HTTPClientConfig promconfig.HTTPClientConfig `yaml:",inline"`
 }
@@ -182,6 +191,18 @@ func (c *MetadataSourceConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	*c = MetadataSourceConfig(raw)
 	return nil
+}
+
+// DisplayName is Name, or the URL with any password redacted.
+func (c MetadataSourceConfig) DisplayName() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	u, err := url.Parse(c.URL)
+	if err != nil {
+		return c.URL
+	}
+	return u.Redacted()
 }
 
 // Validate checks what NewSyncer would otherwise only find out about on
@@ -245,16 +266,17 @@ var DefaultConfig = &Config{
 		PushMetricsUsageTimeout: 30 * time.Second,
 	},
 	Inventory: InventoryConfig{
-		Enabled:                 true,
-		MetadataSyncEnabled:     true,
-		MetadataMetricsNameOnly: false,
-		MetadataSourceWorkers:   4,
-		MetadataSourceTimeout:   time.Minute,
-		SyncInterval:            10 * time.Minute,
-		TimeWindow:              30 * 24 * time.Hour,
-		RunTimeout:              300 * time.Second,
-		MetadataStepTimeout:     30 * time.Second,
-		SummaryStepTimeout:      30 * time.Second,
+		Enabled:                       true,
+		MetadataSyncEnabled:           true,
+		MetadataMetricsNameOnly:       false,
+		MetadataSourceWorkers:         4,
+		MetadataSourceTimeout:         time.Minute,
+		MetadataSourceRefreshInterval: 24 * time.Hour,
+		SyncInterval:                  10 * time.Minute,
+		TimeWindow:                    30 * 24 * time.Hour,
+		RunTimeout:                    300 * time.Second,
+		MetadataStepTimeout:           30 * time.Second,
+		SummaryStepTimeout:            30 * time.Second,
 		// With JobSyncEnabled these three step timeouts, plus the overrun
 		// allowance the inventory syncer adds per enabled step, come to
 		// RunTimeout exactly - the least it can be (see docs/jobs.md).
@@ -521,9 +543,19 @@ func (c InventoryConfig) Validate() error {
 		if c.MetadataSourceTimeout < 0 {
 			errs = append(errs, fmt.Errorf("inventory.metadata_source_timeout must not be negative (got: %s)", c.MetadataSourceTimeout))
 		}
+		if c.MetadataSourceRefreshInterval <= 0 || c.MetadataSourceRefreshInterval >= c.TimeWindow {
+			errs = append(errs, fmt.Errorf("inventory.metadata_source_refresh_interval must be positive and shorter than time_window (got: %s, time_window: %s)", c.MetadataSourceRefreshInterval, c.TimeWindow))
+		}
+		names := make(map[string]int, len(c.MetadataSources))
 		for i, src := range c.MetadataSources {
 			if err := src.Validate(); err != nil {
 				errs = append(errs, fmt.Errorf("inventory.metadata_sources[%d]: %w", i, err))
+			}
+			// Two sources under one name would be recorded as one.
+			if j, dup := names[src.DisplayName()]; dup {
+				errs = append(errs, fmt.Errorf("inventory.metadata_sources[%d]: name %q is already used by metadata_sources[%d]", i, src.DisplayName(), j))
+			} else {
+				names[src.DisplayName()] = i
 			}
 		}
 	}
@@ -717,6 +749,7 @@ func logInventoryConfig(cfg *Config) {
 		"Inventory.MetadataSources", len(cfg.Inventory.MetadataSources),
 		"Inventory.MetadataSourceWorkers", cfg.Inventory.MetadataSourceWorkers,
 		"Inventory.MetadataSourceTimeout", cfg.Inventory.MetadataSourceTimeout,
+		"Inventory.MetadataSourceRefreshInterval", cfg.Inventory.MetadataSourceRefreshInterval,
 		"Inventory.SyncInterval", cfg.Inventory.SyncInterval,
 		"Inventory.TimeWindow", cfg.Inventory.TimeWindow,
 		"Inventory.RunTimeout", cfg.Inventory.RunTimeout,

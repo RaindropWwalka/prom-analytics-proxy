@@ -118,6 +118,9 @@ type fakeProvider struct {
 
 	catalogCommits int
 	catalogItems   []db.MetricCatalogItem // what the last catalog commit carried
+	// sources is which names each source was last recorded as reporting.
+	sources        map[string][]string
+	sourcesDeletes int
 
 	summaryDelay     time.Duration // how long a real refresh would take
 	summaryCalls     int
@@ -143,6 +146,23 @@ func (f *fakeProvider) UpsertMetricsCatalog(_ context.Context, items []db.Metric
 	f.catalogCommits++
 	f.catalogItems = items
 	return nil
+}
+
+func (f *fakeProvider) UpsertMetricsCatalogSources(_ context.Context, source string, names []string, _ time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sources == nil {
+		f.sources = make(map[string][]string)
+	}
+	f.sources[source] = names
+	return nil
+}
+
+func (f *fakeProvider) DeleteMetricsCatalogSourcesBefore(context.Context, time.Time) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sourcesDeletes++
+	return 0, nil
 }
 
 func (f *fakeProvider) RefreshMetricsUsageSummary(ctx context.Context, tr db.TimeRange) error {

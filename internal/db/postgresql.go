@@ -1261,6 +1261,63 @@ func (p *PostGreSQLProvider) UpsertMetricsJobIndex(ctx context.Context, items []
 	return nil
 }
 
+func (p *PostGreSQLProvider) UpsertMetricsCatalogSources(ctx context.Context, source string, names []string, refreshBefore time.Time) error {
+	names = sortedUniqueNames(names)
+	if len(names) == 0 {
+		return nil
+	}
+	// One statement, like UpsertMetricsCatalog. A pair confirmed since
+	// refreshBefore is filtered out before the INSERT rather than skipped by
+	// a conditional DO UPDATE: the latter still locks the row, which is a
+	// write of its own. Sorted and de-duplicated names keep the statement
+	// clear of "cannot affect row a second time" and of lock-order deadlocks.
+	if _, err := p.db.ExecContext(ctx, `
+        INSERT INTO metrics_catalog_sources(name, source, last_seen_at)
+        SELECT n, $2, NOW() AT TIME ZONE 'UTC'
+        FROM unnest($1::text[]) AS n
+        WHERE NOT EXISTS (
+            SELECT 1 FROM metrics_catalog_sources s
+            WHERE s.name = n AND s.source = $2 AND s.last_seen_at >= $3
+        )
+        ON CONFLICT(name, source) DO UPDATE SET
+          last_seen_at = EXCLUDED.last_seen_at
+    `, pq.Array(names), source, refreshBefore.UTC().Format(ISOTimeFormat)); err != nil {
+		return fmt.Errorf("upsert catalog sources: %w", err)
+	}
+	return nil
+}
+
+func (p *PostGreSQLProvider) DeleteMetricsCatalogSourcesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := p.db.ExecContext(ctx, `DELETE FROM metrics_catalog_sources WHERE last_seen_at < $1`, cutoff.UTC().Format(ISOTimeFormat))
+	if err != nil {
+		return 0, ErrorWithOperation(err, "delete stale catalog sources")
+	}
+	return res.RowsAffected()
+}
+
+func (p *PostGreSQLProvider) GetMetricsCatalogSources(ctx context.Context, names []string) (map[string][]string, error) {
+	if len(names) == 0 {
+		return map[string][]string{}, nil
+	}
+	rows, err := ExecuteQuery(ctx, p.db, `
+        SELECT name, source FROM metrics_catalog_sources
+        WHERE name = ANY($1::text[])
+        ORDER BY name, source
+    `, pq.Array(names))
+	if err != nil {
+		return nil, err
+	}
+	return groupCatalogSources(rows)
+}
+
+func (p *PostGreSQLProvider) ListMetricsCatalogSources(ctx context.Context) ([]string, error) {
+	rows, err := ExecuteQuery(ctx, p.db, `SELECT DISTINCT source FROM metrics_catalog_sources ORDER BY source`)
+	if err != nil {
+		return nil, err
+	}
+	return ScanRows(rows, scanJob)
+}
+
 // ListJobs returns the distinct list of jobs known in metrics_job_index
 func (p *PostGreSQLProvider) ListJobs(ctx context.Context) ([]string, error) {
 	rows, err := ExecuteQuery(ctx, p.db, `SELECT DISTINCT job FROM metrics_job_index ORDER BY job`)
