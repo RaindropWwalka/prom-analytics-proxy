@@ -116,9 +116,9 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
           <DataTableColumnHeader column={column} title="Series" />
         ),
         cell: ({ row }) => (
-          <div className="text-right tabular-nums">
+          <span className="tabular-nums">
             {row.original.series.toLocaleString()}
-          </div>
+          </span>
         ),
       },
     ],
