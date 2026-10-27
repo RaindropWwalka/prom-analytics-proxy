@@ -1412,27 +1412,35 @@ func (p *PostGreSQLProvider) ListMetricsCatalogSources(ctx context.Context) ([]s
 	return ScanRows(rows, scanJob)
 }
 
-func (p *PostGreSQLProvider) UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem) error {
+func (p *PostGreSQLProvider) UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem, refreshBefore time.Time) error {
 	items = sortedUniqueServiceItems(items)
-	if len(items) == 0 {
-		return nil
-	}
-	names := make([]string, len(items))
-	services := make([]string, len(items))
-	jobs := make([]string, len(items))
-	for i, it := range items {
-		names[i], services[i], jobs[i] = it.Name, it.Service, it.Job
-	}
-	// One statement for the whole job, like UpsertMetricsCatalog: a shared
-	// exporter's job can carry thousands of (metric, service) pairs.
-	if _, err := p.db.ExecContext(ctx, `
-        INSERT INTO metrics_service_index(name, service, job, updated_at)
-        SELECT n, s, j, NOW()
-        FROM unnest($1::text[], $2::text[], $3::text[]) AS x(n, s, j)
-        ON CONFLICT(name, service, job) DO UPDATE SET
-          updated_at = EXCLUDED.updated_at
-    `, pq.Array(names), pq.Array(services), pq.Array(jobs)); err != nil {
-		return fmt.Errorf("upsert service index: %w", err)
+	refresh := refreshBefore.UTC().Format(ISOTimeFormat)
+	// In chunks, each its own short statement: a single statement over a
+	// whole shared exporter's job holds its locks, and its round trip, for
+	// as long as the slowest row takes. A pair confirmed since refreshBefore
+	// is filtered out before the INSERT rather than skipped by a conditional
+	// DO UPDATE, which would still lock - that is, write - the row.
+	for start := 0; start < len(items); start += serviceIndexChunk {
+		chunk := items[start:min(start+serviceIndexChunk, len(items))]
+		names := make([]string, len(chunk))
+		services := make([]string, len(chunk))
+		jobs := make([]string, len(chunk))
+		for i, it := range chunk {
+			names[i], services[i], jobs[i] = it.Name, it.Service, it.Job
+		}
+		if _, err := p.db.ExecContext(ctx, `
+            INSERT INTO metrics_service_index(name, service, job, updated_at)
+            SELECT n, s, j, NOW() AT TIME ZONE 'UTC'
+            FROM unnest($1::text[], $2::text[], $3::text[]) AS x(n, s, j)
+            WHERE NOT EXISTS (
+                SELECT 1 FROM metrics_service_index i
+                WHERE i.name = n AND i.service = s AND i.job = j AND i.updated_at >= $4
+            )
+            ON CONFLICT(name, service, job) DO UPDATE SET
+              updated_at = EXCLUDED.updated_at
+        `, pq.Array(names), pq.Array(services), pq.Array(jobs), refresh); err != nil {
+			return fmt.Errorf("upsert service index: %w", err)
+		}
 	}
 	return nil
 }

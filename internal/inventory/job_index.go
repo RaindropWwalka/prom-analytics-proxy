@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/nicolastakashi/prom-analytics-proxy/internal/db"
 	"github.com/prometheus/common/model"
@@ -142,7 +143,7 @@ func (s *Syncer) processJob(ctx context.Context, job string, tr db.TimeRange, wo
 		slog.Debug("processed job", "job", job, "worker", workerID, "metrics", len(items))
 	}
 	if len(services) > 0 {
-		if err := s.dbProvider.UpsertMetricsServiceIndex(jobCtx, services); err != nil {
+		if err := s.dbProvider.UpsertMetricsServiceIndex(jobCtx, services, time.Now().Add(-s.serviceIndexRefreshInterval)); err != nil {
 			slog.Error("failed to upsert services for job", "job", job, "worker", workerID, "services", len(services), "err", err)
 			return fmt.Errorf("upsert services of job %s: %w", job, err)
 		}

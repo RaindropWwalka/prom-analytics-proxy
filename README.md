@@ -541,6 +541,8 @@ inventory:
                              # Needed for the job filter and the unused-metrics analysis by job.
   service_label: service     # Also index which service of each job produces each metric,
                              # from the same per-job query (default: service; "" = jobs only)
+  service_index_refresh_interval: 24h # Rewrite a known (metric, service, job) record only
+                             # once it's this old; new ones are written at once (default: 24h)
                              # When true, job_index_timeout counts toward run_timeout's minimum.
   job_index_timeout: 210s    # Timeout for the job index step as a whole (default: 210s)
   job_index_label_timeout: 30s   # Timeout for job label fetch (default: 30s)

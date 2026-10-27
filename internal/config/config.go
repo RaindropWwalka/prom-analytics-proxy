@@ -184,6 +184,10 @@ type InventoryConfig struct {
 	// no extra upstream cost. For jobs such as a shared exporter that carry
 	// many services. Empty records jobs only.
 	ServiceLabel string `yaml:"service_label,omitempty"`
+	// ServiceIndexRefreshInterval is how long a (metric, service, job) record
+	// stands before the job index rewrites it; new ones are written at once.
+	// Has to stay well under TimeWindow.
+	ServiceIndexRefreshInterval time.Duration `yaml:"service_index_refresh_interval,omitempty"`
 }
 
 // MetadataSourceConfig is one Prometheus-compatible API the catalog step
@@ -292,6 +296,7 @@ var DefaultConfig = &Config{
 	},
 	Inventory: InventoryConfig{
 		ServiceLabel:                  "service",
+		ServiceIndexRefreshInterval:   24 * time.Hour,
 		Enabled:                       true,
 		MetadataSyncEnabled:           true,
 		MetadataMetricsNameOnly:       false,
@@ -588,6 +593,9 @@ func (c InventoryConfig) Validate() error {
 	}
 	if c.JobSyncEnabled && c.ServiceLabel != "" && !model.LabelName(c.ServiceLabel).IsValid() {
 		errs = append(errs, fmt.Errorf("inventory.service_label %q is not a valid label name", c.ServiceLabel))
+	}
+	if c.JobSyncEnabled && c.ServiceLabel != "" && (c.ServiceIndexRefreshInterval <= 0 || c.ServiceIndexRefreshInterval >= c.TimeWindow) {
+		errs = append(errs, fmt.Errorf("inventory.service_index_refresh_interval must be positive and shorter than time_window (got: %s)", c.ServiceIndexRefreshInterval))
 	}
 	// Without a worker there's nothing to pull jobs off the fan-out channel,
 	// and the step reports success having indexed nothing.

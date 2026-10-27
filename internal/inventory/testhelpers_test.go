@@ -213,7 +213,7 @@ func (f *fakeProvider) RefreshMetricsUsageSummary(ctx context.Context, tr db.Tim
 	}
 }
 
-func (f *fakeProvider) UpsertMetricsServiceIndex(_ context.Context, items []db.MetricServiceIndexItem) error {
+func (f *fakeProvider) UpsertMetricsServiceIndex(_ context.Context, items []db.MetricServiceIndexItem, _ time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.serviceIndexItems = append(f.serviceIndexItems, items...)

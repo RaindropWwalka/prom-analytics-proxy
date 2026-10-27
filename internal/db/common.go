@@ -220,3 +220,6 @@ func groupCardinality(rows *sql.Rows) (map[string]map[string]int, error) {
 	}
 	return out, nil
 }
+
+// serviceIndexChunk bounds how many service index rows one statement writes.
+const serviceIndexChunk = 5000

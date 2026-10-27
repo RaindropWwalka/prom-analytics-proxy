@@ -941,7 +941,7 @@ func (p *benchDBProvider) AnalyzeUnusedMetrics(ctx context.Context, params db.Un
 	return nil, nil
 }
 
-func (p *benchDBProvider) UpsertMetricsServiceIndex(ctx context.Context, items []db.MetricServiceIndexItem) error {
+func (p *benchDBProvider) UpsertMetricsServiceIndex(ctx context.Context, items []db.MetricServiceIndexItem, refreshBefore time.Time) error {
 	return nil
 }
 

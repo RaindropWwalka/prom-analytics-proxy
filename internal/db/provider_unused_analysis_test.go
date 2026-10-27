@@ -58,7 +58,7 @@ func testAnalyzeUnusedMetrics(t *testing.T, b testBackend) {
 		{Name: "m2", Service: "billing", Job: "api"},
 		{Name: "m2", Service: "billing", Job: "other"}, // counts once for its service
 		{Name: "m3", Service: "metrics", Job: "node"},
-	}))
+	}, time.Now()))
 	assert.Equal(t, []UnusedAnalysisRow{
 		{Service: "billing", Total: 2, Unused: 1},
 		{Service: "metrics", Total: 1, Unused: 1},

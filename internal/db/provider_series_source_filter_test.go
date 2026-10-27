@@ -42,7 +42,7 @@ func testSeriesMetadataSourceFilter(t *testing.T, b testBackend) {
 
 	require.NoError(t, p.UpsertMetricsServiceIndex(ctx, []MetricServiceIndexItem{
 		{Name: "m1", Service: "billing", Job: "a"}, {Name: "m2", Service: "payments", Job: "a"},
-	}))
+	}, time.Now()))
 	assert.Equal(t, []string{"m1"}, names(SeriesMetadataParams{Usage: SeriesMetadataUsageAll, Service: "billing"}))
 	assert.Equal(t, []string{"m2"}, names(SeriesMetadataParams{Usage: SeriesMetadataUsageUnused, Service: "payments"}))
 	assert.Equal(t, []string{"m1"}, names(SeriesMetadataParams{Usage: SeriesMetadataUsageUnused, Job: "a", Service: "billing"}))

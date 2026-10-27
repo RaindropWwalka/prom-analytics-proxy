@@ -649,7 +649,7 @@ func (m *MockDBProvider) AnalyzeUnusedMetrics(ctx context.Context, params db.Unu
 	return nil, nil
 }
 
-func (m *MockDBProvider) UpsertMetricsServiceIndex(ctx context.Context, items []db.MetricServiceIndexItem) error {
+func (m *MockDBProvider) UpsertMetricsServiceIndex(ctx context.Context, items []db.MetricServiceIndexItem, refreshBefore time.Time) error {
 	return nil
 }
 

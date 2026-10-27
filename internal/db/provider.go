@@ -37,8 +37,11 @@ type Provider interface {
 	UpsertMetricsJobIndex(ctx context.Context, items []MetricJobIndexItem) error
 	ListJobs(ctx context.Context) ([]string, error)
 	// UpsertMetricsServiceIndex records which service of which job produces
-	// each metric.
-	UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem) error
+	// each metric. A pair is inserted when new and refreshed only once its
+	// last confirmation is older than refreshBefore, so a steady state - one
+	// shared exporter's job can carry tens of thousands of pairs - rewrites
+	// almost nothing.
+	UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem, refreshBefore time.Time) error
 	ListServices(ctx context.Context) ([]string, error)
 	// UpsertMetricsCatalogSources records that source reported names. A
 	// (name, source) pair is inserted when new and its last_seen_at

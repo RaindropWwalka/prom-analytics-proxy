@@ -1215,7 +1215,7 @@ func (p *SQLiteProvider) ListMetricsCatalogSources(ctx context.Context) ([]strin
 	return ScanRows(rows, scanJob)
 }
 
-func (p *SQLiteProvider) UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem) error {
+func (p *SQLiteProvider) UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem, refreshBefore time.Time) error {
 	items = sortedUniqueServiceItems(items)
 	if len(items) == 0 {
 		return nil
@@ -1228,7 +1228,11 @@ func (p *SQLiteProvider) UpsertMetricsServiceIndex(ctx context.Context, items []
 	}
 	stmt, err := tx.PrepareContext(ctx, `
         INSERT INTO metrics_service_index(name, service, job, updated_at)
-        VALUES (?, ?, ?, datetime('now'))
+        SELECT ?1, ?2, ?3, datetime('now')
+        WHERE NOT EXISTS (
+            SELECT 1 FROM metrics_service_index
+            WHERE name = ?1 AND service = ?2 AND job = ?3 AND updated_at >= ?4
+        )
         ON CONFLICT(name, service, job) DO UPDATE SET
             updated_at = excluded.updated_at
     `)
@@ -1237,8 +1241,9 @@ func (p *SQLiteProvider) UpsertMetricsServiceIndex(ctx context.Context, items []
 		return fmt.Errorf("prepare: %w", err)
 	}
 	defer CloseResource(stmt)
+	refresh := refreshBefore.UTC().Format(SQLiteTimeFormat)
 	for _, it := range items {
-		if _, err := stmt.ExecContext(ctx, it.Name, it.Service, it.Job); err != nil {
+		if _, err := stmt.ExecContext(ctx, it.Name, it.Service, it.Job, refresh); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("exec: %w", err)
 		}
