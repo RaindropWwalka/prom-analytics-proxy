@@ -40,7 +40,7 @@ export default function Layout({ children, breadcrumb }: LayoutProps) {
       <SidebarProvider>
         <div className="flex w-full">
           <AppSidebar />
-          <SidebarInset className="flex flex-col w-full">
+          <SidebarInset className="flex flex-col w-full min-w-0">
             <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center border-b border-sidebar-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
               <div className="flex w-full items-center justify-between px-4">
                 <div className="flex items-center gap-2">
@@ -74,7 +74,7 @@ export default function Layout({ children, breadcrumb }: LayoutProps) {
                 </div>
               </div>
             </header>
-            <div className="flex-1 w-full">{children}</div>
+            <div className="flex-1 w-full min-w-0">{children}</div>
           </SidebarInset>
         </div>
       </SidebarProvider>
