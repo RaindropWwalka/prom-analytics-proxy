@@ -75,6 +75,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/metricMetadata/{name}": {
+            "get": {
+                "description": "Get one metric's catalog entry: type, help, unit, usage counts and the metadata sources reporting it.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "metrics"
+                ],
+                "summary": "Metric metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Metric name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MetricMetadata"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/metricQueryPerformanceStatistics/{name}": {
             "get": {
                 "description": "Get query performance statistics for a specific metric including query rate and performance metrics.",
@@ -1351,6 +1392,10 @@ const docTemplate = `{
                 },
                 "series": {
                     "type": "integer"
+                },
+                "source": {
+                    "description": "Source is the Prometheus the series came from, as told by the\nexternal label named by producers_source_label; empty without one.",
+                    "type": "string"
                 }
             }
         },

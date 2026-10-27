@@ -15,6 +15,7 @@ import (
 	"github.com/nicolastakashi/prom-analytics-proxy/api/models"
 	"github.com/nicolastakashi/prom-analytics-proxy/internal/db"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -626,4 +627,58 @@ func TestListSources(t *testing.T) {
 	newTestRouter(t, &sourcesProvider{}).ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/sources", nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	assert.JSONEq(t, `{"data":["source-a","source-b"]}`, w.Body.String())
+}
+
+func TestProducersOf_SplitsAJobByTheSourceLabel(t *testing.T) {
+	t.Parallel()
+	series := []model.LabelSet{
+		{"job": "node", "prometheus": "source-a"},
+		{"job": "node", "prometheus": "source-a"},
+		{"job": "node", "prometheus": "source-b"},
+		{"job": "api", "prometheus": "source-b"},
+		{"job": "api"},
+		{"prometheus": "source-a"}, // no job: nobody to attribute it to
+	}
+
+	assert.Equal(t, []db.MetricProducersResult{
+		{Job: "node", Source: "source-a", Series: 2},
+		{Job: "api", Source: "", Series: 1},
+		{Job: "api", Source: "source-b", Series: 1},
+		{Job: "node", Source: "source-b", Series: 1},
+	}, producersOf(series, "prometheus"))
+
+	assert.Equal(t, []db.MetricProducersResult{
+		{Job: "node", Series: 3},
+		{Job: "api", Series: 2},
+	}, producersOf(series, ""), "without a source label producers are per job, as before")
+}
+
+// metadataByNameProvider serves one catalog entry and its sources.
+type metadataByNameProvider struct {
+	db.Provider
+}
+
+func (metadataByNameProvider) GetSeriesMetadataByNames(_ context.Context, names []string, _ string) ([]models.MetricMetadata, error) {
+	if names[0] != "up" {
+		return nil, nil
+	}
+	return []models.MetricMetadata{{Name: "up", Type: "gauge", Help: "Target is up.", Unit: ""}}, nil
+}
+
+func (metadataByNameProvider) GetMetricsCatalogSources(context.Context, []string) (map[string][]string, error) {
+	return map[string][]string{"up": {"source-a", "source-b"}}, nil
+}
+
+func TestMetricMetadata(t *testing.T) {
+	t.Parallel()
+	r := newTestRouter(t, metadataByNameProvider{})
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/metricMetadata/up", nil))
+	require.Equal(t, 200, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"name":"up","type":"gauge","help":"Target is up.","unit":"","sources":["source-a","source-b"]}`, w.Body.String())
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/metricMetadata/missing", nil))
+	assert.Equal(t, 404, w.Code)
 }

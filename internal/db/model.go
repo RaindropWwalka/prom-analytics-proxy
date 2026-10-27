@@ -107,7 +107,10 @@ type QueryTimeRangeDistributionResult struct {
 }
 
 type MetricProducersResult struct {
-	Job    string `json:"job"`
+	Job string `json:"job"`
+	// Source is the Prometheus the series came from, as told by the
+	// external label named by producers_source_label; empty without one.
+	Source string `json:"source,omitempty"`
 	Series int    `json:"series"`
 }
 

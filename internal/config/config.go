@@ -32,6 +32,11 @@ type Config struct {
 	QueryProcessing QueryProcessing      `yaml:"query_processing,omitempty"`
 	Retention       RetentionConfig      `yaml:"retention,omitempty"`
 	LeaderElection  LeaderElectionConfig `yaml:"leader_election,omitempty"`
+	// ProducersSourceLabel is the series label - an external label each
+	// Prometheus stamps on what it writes - that splits a metric's producers
+	// by the Prometheus they came from, so the same job scraped by several
+	// counts once per Prometheus. Empty groups by job alone.
+	ProducersSourceLabel string `yaml:"producers_source_label,omitempty"`
 }
 
 type QueryProcessing struct {
@@ -255,6 +260,7 @@ type LeaderElectionConfig struct {
 }
 
 var DefaultConfig = &Config{
+	ProducersSourceLabel: "prometheus",
 	CORS: CORSConfig{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
