@@ -16,26 +16,15 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useSearchParams } from "wouter";
+import { ExecutionOrigin, HeadersPopover } from "./execution-origin";
+import { ExecutionsFilters } from "./executions-filters";
+import { useExecutionsFilters } from "./use-executions-filters";
 
 type ExtendedColumnDef<
   TData extends TableData,
   TValue = unknown,
 > = LegacyColumnDef<TData, TValue> & {
   maxWidth?: string | number;
-};
-
-// Generate consistent colors for chip values
-const generateColorForValue = (value: string): string => {
-  let hash = 0;
-  for (let i = 0; i < value.length; i++) {
-    const char = value.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-
-  // Generate HSL color with higher saturation and lower lightness for more vibrant colors
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 75%, 75%)`;
 };
 
 // Format time range duration in human-readable form
@@ -77,101 +66,10 @@ const formatTimeRangeDuration = (start: string, end: string): string => {
   }
 };
 
-const HTTPHeadersChips: React.FC<{ httpHeaders: Record<string, string> }> = ({
-  httpHeaders,
-}) => {
-  // Filter out entries with empty keys or values
-  const entries = Object.entries(httpHeaders).filter(
-    ([key, value]) => key.trim() !== "" && value.trim() !== "",
-  );
-  const maxVisibleChips = 3;
-
-  if (entries.length === 0) {
-    return <span className="text-muted-foreground">-</span>;
-  }
-
-  const visibleChips = entries.slice(0, maxVisibleChips);
-  const hiddenChips = entries.slice(maxVisibleChips);
-
-  const ChipContent: React.FC<{ chipKey: string; value: string }> = ({
-    chipKey,
-    value,
-  }) => {
-    const chipText = `${chipKey}: ${value}`;
-    const maxLength = 30;
-
-    if (chipText.length <= maxLength) {
-      return (
-        <Badge
-          variant="outline"
-          className="text-xs border"
-          style={{
-            backgroundColor: generateColorForValue(value),
-            borderColor: generateColorForValue(value),
-            color: "#374151",
-          }}
-        >
-          {chipText}
-        </Badge>
-      );
-    }
-
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge
-            variant="outline"
-            className="text-xs border cursor-help"
-            style={{
-              backgroundColor: generateColorForValue(value),
-              borderColor: generateColorForValue(value),
-              color: "#374151",
-            }}
-          >
-            {chipText.substring(0, maxLength - 3)}...
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent
-          side="top"
-          className="bg-slate-900 text-white border-slate-700 px-3 py-2"
-        >
-          <span className="font-mono text-xs">{chipText}</span>
-        </TooltipContent>
-      </Tooltip>
-    );
-  };
-
-  return (
-    <div className="flex flex-wrap gap-1 items-center">
-      {visibleChips.map(([key, value]) => (
-        <ChipContent key={key} chipKey={key} value={value} />
-      ))}
-      {hiddenChips.length > 0 && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Badge variant="outline" className="text-xs cursor-help">
-              +{hiddenChips.length} more
-            </Badge>
-          </TooltipTrigger>
-          <TooltipContent
-            side="top"
-            className="max-w-xs bg-slate-900 text-white border-slate-700 px-3 py-2"
-          >
-            <div className="flex flex-wrap gap-1">
-              {hiddenChips.map(([key, value]) => (
-                <ChipContent key={key} chipKey={key} value={value} />
-              ))}
-            </div>
-          </TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  );
-};
-
 const columns: ExtendedColumnDef<QueryExecution>[] = [
   {
     accessorKey: "timestamp",
+    size: 150,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Timestamp" />
     ),
@@ -195,6 +93,7 @@ const columns: ExtendedColumnDef<QueryExecution>[] = [
   },
   {
     accessorKey: "type",
+    size: 90,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Type" />
     ),
@@ -206,6 +105,7 @@ const columns: ExtendedColumnDef<QueryExecution>[] = [
   },
   {
     accessorKey: "status",
+    size: 80,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Status" />
     ),
@@ -227,6 +127,7 @@ const columns: ExtendedColumnDef<QueryExecution>[] = [
   },
   {
     accessorKey: "duration",
+    size: 90,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Duration" />
     ),
@@ -234,6 +135,7 @@ const columns: ExtendedColumnDef<QueryExecution>[] = [
   },
   {
     accessorKey: "samples",
+    size: 90,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Samples" />
     ),
@@ -248,6 +150,7 @@ const columns: ExtendedColumnDef<QueryExecution>[] = [
   },
   {
     accessorKey: "timeRange",
+    size: 110,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Time Range" />
     ),
@@ -319,24 +222,23 @@ const columns: ExtendedColumnDef<QueryExecution>[] = [
   },
   {
     accessorKey: "steps",
+    size: 70,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Steps" />
     ),
     cell: ({ row }) => String(row.getValue("steps")),
   },
   {
-    accessorKey: "httpHeaders",
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title="HTTP Headers" />
-    ),
-    cell: ({ row }) => {
-      const httpHeaders = row.getValue("httpHeaders") as
-        Record<string, string> | undefined;
-      if (!httpHeaders || Object.keys(httpHeaders).length === 0) {
-        return <span className="text-muted-foreground">-</span>;
-      }
-      return <HTTPHeadersChips httpHeaders={httpHeaders} />;
-    },
+    id: "origin",
+    size: 280,
+    header: "Origin",
+    cell: ({ row }) => <ExecutionOrigin headers={row.original.httpHeaders} />,
+  },
+  {
+    id: "headers",
+    size: 100,
+    header: "Headers",
+    cell: ({ row }) => <HeadersPopover headers={row.original.httpHeaders} />,
   },
 ];
 
@@ -399,9 +301,15 @@ export const QueryExecutions: React.FC<Props> = ({ fingerprint }) => {
     [sorting],
   );
 
+  const filters = useExecutionsFilters();
+
   const { data, isLoading } = useQuery<PagedResult<QueryExecution>>({
     queryKey: [
       "queryExecutions",
+      filters.type,
+      filters.status,
+      filters.origin,
+      filters.debouncedHeaderSearch,
       fingerprint,
       fromISO,
       toISO,
@@ -419,28 +327,34 @@ export const QueryExecutions: React.FC<Props> = ({ fingerprint }) => {
         pageSize,
         serverSortBy,
         sortOrder,
-        "all",
+        filters.type,
+        filters.status,
+        filters.origin,
+        filters.debouncedHeaderSearch,
       ),
     enabled: Boolean(fingerprint),
   });
 
-  if (isLoading) {
-    return <div className="p-2 text-sm text-muted-foreground">Loading...</div>;
-  }
-
   return (
-    <DataTable<QueryExecution>
-      data={data?.data || []}
-      columns={columns}
-      pagination={true}
-      pageSize={pageSize}
-      className="w-full"
-      serverSide={true}
-      sortingState={sorting}
-      currentPage={page}
-      totalPages={data?.totalPages || 1}
-      onSortingChange={(s) => handleSortingChange(s)}
-      onPaginationChange={(p) => handlePageChange(p)}
-    />
+    <div className="space-y-3">
+      <ExecutionsFilters filters={filters} />
+      {isLoading ? (
+        <div className="p-2 text-sm text-muted-foreground">Loading...</div>
+      ) : (
+        <DataTable<QueryExecution>
+          data={data?.data || []}
+          columns={columns}
+          pagination={true}
+          pageSize={pageSize}
+          className="w-full"
+          serverSide={true}
+          sortingState={sorting}
+          currentPage={page}
+          totalPages={data?.totalPages || 1}
+          onSortingChange={(s) => handleSortingChange(s)}
+          onPaginationChange={(p) => handlePageChange(p)}
+        />
+      )}
+    </div>
   );
 };

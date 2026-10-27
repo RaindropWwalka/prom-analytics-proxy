@@ -43,6 +43,9 @@ interface FetchOptions {
   format?: "json" | "yaml";
   fingerprint?: string;
   type?: string;
+  status?: string;
+  origin?: string;
+  headerSearch?: string;
 }
 
 const API_CONFIG: ApiConfig = {
@@ -143,6 +146,9 @@ async function fetchApiData<T extends ApiResponse>(
     ...(format && { format }),
     ...(fingerprint && { fingerprint }),
     ...(options.type && { type: options.type }),
+    ...(options.status && { status: options.status }),
+    ...(options.origin && { origin: options.origin }),
+    ...(options.headerSearch && { headerSearch: options.headerSearch }),
   });
 
   try {
@@ -345,6 +351,9 @@ export async function getQueryExecutions(
   sortBy?: string,
   sortOrder?: string,
   type?: "all" | "instant" | "range",
+  status?: string,
+  origin?: string,
+  headerSearch?: string,
 ): Promise<PagedResult<QueryExecution>> {
   return withErrorHandling(
     () =>
@@ -359,6 +368,9 @@ export async function getQueryExecutions(
           sortBy,
           sortOrder,
           type,
+          status,
+          origin,
+          headerSearch,
         },
       ),
     { total: 0, totalPages: 0, data: [] },
