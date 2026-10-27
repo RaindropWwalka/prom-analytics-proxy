@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { MetricDescription } from "./metric-description";
 
@@ -39,5 +40,39 @@ describe("MetricDescription", () => {
     await userEvent.click(screen.getByRole("button"));
 
     expect(onRowClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("MetricDescription in a table", () => {
+  // The table's part: it remembers which one description is open.
+  function TwoDescriptions() {
+    const [open, setOpen] = useState<string | null>(null);
+    return (
+      <>
+        {["first_metric", "second_metric"].map((name) => (
+          <MetricDescription
+            key={name}
+            metric={{ ...metric, name, help: `help of ${name}` }}
+            open={open === name}
+            onOpenChange={(o) => setOpen(o ? name : null)}
+          />
+        ))}
+      </>
+    );
+  }
+
+  it("keeps only one description open at a time", async () => {
+    render(<TwoDescriptions />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "help of first_metric" }),
+    );
+    expect(screen.getByText("first_metric")).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "help of second_metric" }),
+    );
+    expect(screen.getByText("second_metric")).toBeInTheDocument();
+    expect(screen.queryByText("first_metric")).not.toBeInTheDocument();
   });
 });

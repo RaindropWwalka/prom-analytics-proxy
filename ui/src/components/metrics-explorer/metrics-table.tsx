@@ -26,6 +26,12 @@ export function MetricsTable({
   onTableStateChange,
 }: MetricsTableProps) {
   const [, setLocation] = useLocation();
+  // The one popover open in the table, if any: "<kind>:<metric>".
+  const [openPopover, setOpenPopover] = React.useState<string | null>(null);
+  const popover = (key: string) => ({
+    open: openPopover === key,
+    onOpenChange: (open: boolean) => setOpenPopover(open ? key : null),
+  });
   const prevSearchRef = React.useRef(searchQuery);
 
   // Update filter when search query changes
@@ -121,14 +127,24 @@ export function MetricsTable({
     {
       accessorKey: "help",
       header: "Description",
-      cell: ({ row }) => <MetricDescription metric={row.original} />,
+      cell: ({ row }) => (
+        <MetricDescription
+          metric={row.original}
+          {...popover(`description:${row.original.name}`)}
+        />
+      ),
     },
     {
       accessorKey: "sources",
       size: 150,
       header: "Sources",
       enableSorting: false,
-      cell: ({ row }) => <MetricSources sources={row.original.sources} />,
+      cell: ({ row }) => (
+        <MetricSources
+          sources={row.original.sources}
+          {...popover(`sources:${row.original.name}`)}
+        />
+      ),
     },
     {
       accessorKey: "alertCount",

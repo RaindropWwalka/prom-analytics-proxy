@@ -9,17 +9,24 @@ import { MetricMetadata } from "@/lib/types";
 
 interface MetricDescriptionProps {
   metric: MetricMetadata;
+  // Controlled by the table, so opening one description closes the other.
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 // MetricDescription shows a metric's help truncated to one line; clicking it
 // opens the full help with the type, unit and sources the table has no room
 // for.
-export function MetricDescription({ metric }: MetricDescriptionProps) {
+export function MetricDescription({
+  metric,
+  open,
+  onOpenChange,
+}: MetricDescriptionProps) {
   if (!metric.help) {
     return <span className="text-sm text-muted-foreground">—</span>;
   }
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -34,6 +41,9 @@ export function MetricDescription({ metric }: MetricDescriptionProps) {
         align="start"
         className="w-96 space-y-3"
         onClick={(e) => e.stopPropagation()}
+        // Returning focus to the trigger would close the next popover the
+        // user just opened.
+        onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <div className="font-medium break-all">{metric.name}</div>
         <p className="text-sm whitespace-pre-wrap break-words">{metric.help}</p>
