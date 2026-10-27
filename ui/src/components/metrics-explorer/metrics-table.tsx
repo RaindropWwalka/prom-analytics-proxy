@@ -5,6 +5,7 @@ import { SortingState } from "@tanstack/react-table";
 import { type LegacyColumnDef } from "@tanstack/react-table/legacy";
 import { MetricTypeTag } from "@/components/metrics-explorer/metric-type-tag";
 import { MetricSources } from "@/components/metrics-explorer/metric-sources";
+import { MetricDescription } from "@/components/metrics-explorer/metric-description";
 import { useLocation } from "wouter";
 import { MetricMetadata, PagedResult, TableState } from "@/lib/types";
 import { fromUTC } from "@/lib/utils/date-utils";
@@ -120,14 +121,7 @@ export function MetricsTable({
       accessorKey: "help",
       size: 250,
       header: "Description",
-      cell: ({ row }) => (
-        <div
-          className="text-sm text-muted-foreground truncate"
-          title={row.getValue("help")}
-        >
-          {row.getValue("help")}
-        </div>
-      ),
+      cell: ({ row }) => <MetricDescription metric={row.original} />,
     },
     {
       accessorKey: "sources",
