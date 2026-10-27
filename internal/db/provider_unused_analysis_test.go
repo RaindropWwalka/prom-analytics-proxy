@@ -69,6 +69,19 @@ func testAnalyzeUnusedMetrics(t *testing.T, b testBackend) {
 		{Service: "billing", Source: "source-a", Total: 1, Unused: 0},
 	}, analyze(UnusedAnalysisParams{GroupBy: UnusedAnalysisByServiceSource}))
 
+	// Series: m2 (unused) is the heavy one; m1 (used) is light.
+	require.NoError(t, p.ReplaceMetricsCardinality(ctx, "source-a", map[string]int{"m1": 5, "m3": 7}))
+	require.NoError(t, p.ReplaceMetricsCardinality(ctx, "source-b", map[string]int{"m2": 100}))
+	assert.Equal(t, []UnusedAnalysisRow{
+		{Job: "api", Total: 2, Unused: 1, Series: 105, UnusedSeries: 100},
+		{Job: "node", Total: 1, Unused: 1, Series: 7, UnusedSeries: 7},
+	}, analyze(UnusedAnalysisParams{GroupBy: UnusedAnalysisByJob}))
+	assert.Equal(t, []UnusedAnalysisRow{
+		{Job: "api", Source: "source-b", Total: 1, Unused: 1, Series: 100, UnusedSeries: 100},
+		{Job: "node", Source: "source-a", Total: 1, Unused: 1, Series: 7, UnusedSeries: 7},
+		{Job: "api", Source: "source-a", Total: 1, Unused: 0, Series: 5, UnusedSeries: 0},
+	}, analyze(UnusedAnalysisParams{GroupBy: UnusedAnalysisByJobSource}), "per source, a source's own series")
+
 	_, err := p.AnalyzeUnusedMetrics(ctx, UnusedAnalysisParams{GroupBy: "pod"})
 	assert.Error(t, err)
 }

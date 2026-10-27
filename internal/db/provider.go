@@ -389,4 +389,8 @@ type UnusedAnalysisRow struct {
 	Source  string `json:"source,omitempty"`
 	Total   int    `json:"total"`
 	Unused  int    `json:"unused"`
+	// Series and UnusedSeries are the group's head series, all and of its
+	// unused metrics (see metrics_cardinality).
+	Series       int `json:"series"`
+	UnusedSeries int `json:"unusedSeries"`
 }

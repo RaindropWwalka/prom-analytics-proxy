@@ -989,10 +989,10 @@ func (r *routes) seriesMetadata(w http.ResponseWriter, req *http.Request) {
 }
 
 // attachSources fills in which metadata sources report each metric on a
-// page. Looked up for the page's names only, in one query, rather than
-// joined into every series-metadata query shape. A failure leaves the page
-// without sources instead of failing it: they're detail on the page, not
-// what was asked for.
+// page, and how many series each holds. Looked up for the page's names only,
+// one query each, rather than joined into every series-metadata query
+// shape. A failure leaves the page without them instead of failing it:
+// they're detail on the page, not what was asked for.
 func (r *routes) attachSources(ctx context.Context, page []models.MetricMetadata) {
 	if len(page) == 0 {
 		return
@@ -1008,6 +1008,14 @@ func (r *routes) attachSources(ctx context.Context, page []models.MetricMetadata
 	}
 	for i := range page {
 		page[i].Sources = sources[page[i].Name]
+	}
+	series, err := r.dbProvider.GetMetricsCardinality(ctx, names)
+	if err != nil {
+		slog.Warn("unable to retrieve metric cardinality; returning series metadata without it", "err", err)
+		return
+	}
+	for i := range page {
+		page[i].Series = series[page[i].Name]
 	}
 }
 

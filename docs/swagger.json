@@ -1787,6 +1787,10 @@
                 "job": {
                     "type": "string"
                 },
+                "series": {
+                    "description": "Series and UnusedSeries are the group's head series, all and of its\nunused metrics (see metrics_cardinality).",
+                    "type": "integer"
+                },
                 "service": {
                     "type": "string"
                 },
@@ -1797,6 +1801,9 @@
                     "type": "integer"
                 },
                 "unused": {
+                    "type": "integer"
+                },
+                "unusedSeries": {
                     "type": "integer"
                 }
             }
@@ -1864,6 +1871,13 @@
                 },
                 "recordCount": {
                     "type": "integer"
+                },
+                "series": {
+                    "description": "Series is the metric's head series per metadata source, for the\nsources whose recorded top-N (inventory.cardinality_limit) it is in.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
                 },
                 "sources": {
                     "description": "Sources are the inventory.metadata_sources that report this metric,\nsorted. Empty when the catalog is read from the upstream.",

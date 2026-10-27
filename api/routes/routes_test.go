@@ -577,6 +577,10 @@ func (p *sourcesProvider) GetMetricsCatalogSources(context.Context, []string) (m
 	return p.sources, p.sourcesErr
 }
 
+func (p *sourcesProvider) GetMetricsCardinality(context.Context, []string) (map[string]map[string]int, error) {
+	return map[string]map[string]int{"up": {"source-a": 12}}, nil
+}
+
 func (p *sourcesProvider) ListMetricsCatalogSources(context.Context) ([]string, error) {
 	return []string{"source-a", "source-b"}, nil
 }
@@ -604,6 +608,7 @@ func TestSeriesMetadata_AttachesSources(t *testing.T) {
 
 	require.Len(t, page, 2)
 	assert.Equal(t, []string{"source-a", "source-b"}, page[0].Sources)
+	assert.Equal(t, map[string]int{"source-a": 12}, page[0].Series)
 	assert.Empty(t, page[1].Sources)
 }
 
@@ -685,6 +690,10 @@ func (metadataByNameProvider) GetMetricsCatalogSources(context.Context, []string
 	return map[string][]string{"up": {"source-a", "source-b"}}, nil
 }
 
+func (metadataByNameProvider) GetMetricsCardinality(context.Context, []string) (map[string]map[string]int, error) {
+	return map[string]map[string]int{"up": {"source-a": 3}}, nil
+}
+
 func TestMetricMetadata(t *testing.T) {
 	t.Parallel()
 	r := newTestRouter(t, metadataByNameProvider{})
@@ -692,7 +701,7 @@ func TestMetricMetadata(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/metricMetadata/up", nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
-	assert.JSONEq(t, `{"name":"up","type":"gauge","help":"Target is up.","unit":"","sources":["source-a","source-b"]}`, w.Body.String())
+	assert.JSONEq(t, `{"name":"up","type":"gauge","help":"Target is up.","unit":"","sources":["source-a","source-b"],"series":{"source-a":3}}`, w.Body.String())
 
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/metricMetadata/missing", nil))
@@ -718,7 +727,7 @@ func TestAnalyzeUnused(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/analysis/unused?groupBy=job,source&source=source-a", nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
-	assert.JSONEq(t, `{"data":[{"job":"api","source":"source-a","total":10,"unused":4}]}`, w.Body.String())
+	assert.JSONEq(t, `{"data":[{"job":"api","source":"source-a","total":10,"unused":4,"series":0,"unusedSeries":0}]}`, w.Body.String())
 	assert.Equal(t, db.UnusedAnalysisByJobSource, p.got.GroupBy)
 	assert.Equal(t, "source-a", p.got.Source)
 	assert.WithinDuration(t, time.Now().Add(-30*24*time.Hour), p.got.SyncedSince, time.Minute,
