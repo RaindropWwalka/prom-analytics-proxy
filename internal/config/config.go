@@ -175,8 +175,12 @@ type MetadataSourceConfig struct {
 	// Name is what the source is recorded and shown as - see
 	// metrics_catalog_sources. Defaults to the URL, with any password
 	// redacted.
-	Name             string                      `yaml:"name,omitempty"`
-	URL              string                      `yaml:"url"`
+	Name string `yaml:"name,omitempty"`
+	URL  string `yaml:"url"`
+	// MetricsNameOnly overrides inventory.metadata_metrics_name_only for
+	// this source: true reads only its metric names, as for a Thanos
+	// Querier that has no metadata to give but does know every name.
+	MetricsNameOnly  *bool                       `yaml:"metrics_name_only,omitempty"`
 	HTTPClientConfig promconfig.HTTPClientConfig `yaml:",inline"`
 }
 

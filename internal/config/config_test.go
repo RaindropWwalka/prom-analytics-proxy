@@ -435,3 +435,18 @@ func TestInventoryConfig_ValidateChecksMetadataSourceRefreshInterval(t *testing.
 	cfg.MetadataSourceRefreshInterval = 0
 	assert.ErrorContains(t, cfg.Validate(), "inventory.metadata_source_refresh_interval")
 }
+
+func TestMetadataSourceConfig_ParsesMetricsNameOnly(t *testing.T) {
+	var cfg Config
+	require.NoError(t, yaml.Unmarshal([]byte(`
+inventory:
+  metadata_sources:
+  - url: http://thanos-query:9090
+    metrics_name_only: true
+  - url: http://prometheus:9090
+`), &cfg))
+	srcs := cfg.Inventory.MetadataSources
+	require.NotNil(t, srcs[0].MetricsNameOnly)
+	assert.True(t, *srcs[0].MetricsNameOnly)
+	assert.Nil(t, srcs[1].MetricsNameOnly, "unset follows inventory.metadata_metrics_name_only")
+}

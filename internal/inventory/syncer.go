@@ -56,6 +56,8 @@ type Syncer struct {
 type metadataSource struct {
 	name string
 	api  v1.API
+	// nameOnly, when set, overrides the syncer-wide choice of endpoint.
+	nameOnly *bool
 }
 
 // stepOverrunAllowance is what a cycle budget has to carry, per enabled
@@ -192,7 +194,7 @@ func NewSyncer(dbp db.Provider, upstream string, cfg *config.Config, reg prometh
 		if err != nil {
 			return nil, fmt.Errorf("inventory.metadata_sources[%d] (%s): %w", i, name, err)
 		}
-		sources = append(sources, metadataSource{name: name, api: v1.NewAPI(c)})
+		sources = append(sources, metadataSource{name: name, api: v1.NewAPI(c), nameOnly: src.MetricsNameOnly})
 	}
 
 	lim := ""
@@ -461,6 +463,12 @@ func (s *Syncer) fetchSource(ctx context.Context, src metadataSource, fetch func
 		var cancel context.CancelFunc
 		srcCtx, cancel = context.WithTimeout(ctx, s.metadataSourceTimeout)
 		defer cancel()
+	}
+	if src.nameOnly != nil {
+		fetch = s.fetchMetadataItems
+		if *src.nameOnly {
+			fetch = s.fetchMetricNameItems
+		}
 	}
 	start := time.Now()
 	items, err := fetch(srcCtx, src.api)
