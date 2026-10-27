@@ -83,6 +83,9 @@ export interface MetricMetadata {
   dashboardCount?: number;
   queryCount?: number;
   lastQueriedAt?: string;
+  // Inventory metadata sources reporting this metric; absent when the
+  // catalog is read from the upstream.
+  sources?: string[];
 }
 
 export interface Producer {
