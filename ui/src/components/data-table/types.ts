@@ -30,6 +30,9 @@ export interface DataTableProps<TData extends TableData> {
 
   // Callbacks for server-side operations
   onSortingChange?: (sorting: SortingState) => void;
+  // Server-side tables pick up a new page size here; client-side ones
+  // handle it on their own.
+  onPageSizeChange?: (pageSize: number) => void;
   onFilterChange?: (value: string) => void;
   onPaginationChange?: (page: number) => void;
 }
@@ -46,6 +49,10 @@ export interface DataTablePaginationProps {
   totalPages: number;
   currentPage: number;
   onPageChange: (page: number) => void;
+  // The rows-per-page picker shows only when onPageSizeChange is given.
+  pageSize?: number;
+  pageSizeOptions?: number[];
+  onPageSizeChange?: (pageSize: number) => void;
   className?: string;
 }
 

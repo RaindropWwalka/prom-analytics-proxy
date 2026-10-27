@@ -32,6 +32,7 @@ export function DataTable<TData extends TableData>({
   searchColumn,
   pagination = true,
   pageSize = 10,
+  pageSizeOptions,
   onRowClick,
   className,
   // Server-side props
@@ -43,6 +44,7 @@ export function DataTable<TData extends TableData>({
   onSortingChange,
   onFilterChange,
   onPaginationChange,
+  onPageSizeChange,
 }: DataTableProps<TData>) {
   "use no memo";
 
@@ -54,7 +56,24 @@ export function DataTable<TData extends TableData>({
   const [pageIndex, setPageIndex] = useState(
     externalCurrentPage ? externalCurrentPage - 1 : 0,
   );
-  const [currentPageSize] = useState(pageSize);
+  const [currentPageSize, setCurrentPageSize] = useState(pageSize);
+
+  // A server-side table's page size is its caller's.
+  useEffect(() => {
+    if (serverSide) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCurrentPageSize(pageSize);
+    }
+  }, [serverSide, pageSize]);
+
+  const handlePageSizeChange = (size: number) => {
+    if (serverSide) {
+      onPageSizeChange?.(size);
+    } else {
+      setCurrentPageSize(size);
+      setPageIndex(0);
+    }
+  };
 
   // Use external state if in server-side mode. These effects intentionally
   // sync controlled props into local state for the server-side mode.
@@ -278,6 +297,11 @@ export function DataTable<TData extends TableData>({
           currentPage={serverSide ? externalCurrentPage || 1 : pageIndex + 1}
           totalPages={totalPages}
           onPageChange={handlePageChange}
+          pageSize={currentPageSize}
+          pageSizeOptions={pageSizeOptions}
+          onPageSizeChange={
+            !serverSide || onPageSizeChange ? handlePageSizeChange : undefined
+          }
         />
       )}
     </div>

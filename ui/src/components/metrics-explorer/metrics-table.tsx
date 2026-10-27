@@ -220,6 +220,9 @@ export function MetricsTable({
         onSortingChange={handleSortingChange}
         onFilterChange={handleFilterChange}
         onPaginationChange={handlePaginationChange}
+        onPageSizeChange={(pageSize) =>
+          onTableStateChange({ ...tableState, pageSize, page: 1 })
+        }
         onRowClick={(row) => handleMetricClick(row.name)}
       />
     </div>

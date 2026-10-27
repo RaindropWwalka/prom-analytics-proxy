@@ -230,6 +230,7 @@ interface TabContentProps<T extends TableData> {
   onSortingChange: (sorting: SortingState) => void;
   onFilterChange: (filter: string) => void;
   onPaginationChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
 }
 
 // DataTable doesn't enforce the searchColumn type at runtime, so we'll use this workaround
@@ -244,6 +245,7 @@ function TabContent<T extends TableData>({
   onSortingChange,
   onFilterChange,
   onPaginationChange,
+  onPageSizeChange,
 }: TabContentProps<T>) {
   if (isLoading) {
     return (
@@ -284,6 +286,7 @@ function TabContent<T extends TableData>({
       onSortingChange={onSortingChange}
       onFilterChange={onFilterChange}
       onPaginationChange={onPaginationChange}
+      onPageSizeChange={onPageSizeChange}
     />
   );
 }
@@ -292,7 +295,7 @@ export default function MetricUsage({
   metricName,
   dateRange,
 }: MetricUsageProps) {
-  const pageSize = 10;
+  const [pageSize, setPageSize] = React.useState(10);
 
   // Initialize tab states using the custom hook
   const queriesState = useTabState(1, "avgDuration", "desc");
@@ -400,6 +403,10 @@ export default function MetricUsage({
               onSortingChange={queriesState.setSorting}
               onFilterChange={queriesState.setFilter}
               onPaginationChange={queriesState.setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                queriesState.setPage(1);
+              }}
             />
           </TabsContent>
 
@@ -415,6 +422,10 @@ export default function MetricUsage({
               onSortingChange={alertsState.setSorting}
               onFilterChange={alertsState.setFilter}
               onPaginationChange={alertsState.setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                alertsState.setPage(1);
+              }}
             />
           </TabsContent>
 
@@ -430,6 +441,10 @@ export default function MetricUsage({
               onSortingChange={recordingsState.setSorting}
               onFilterChange={recordingsState.setFilter}
               onPaginationChange={recordingsState.setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                recordingsState.setPage(1);
+              }}
             />
           </TabsContent>
 
@@ -445,6 +460,10 @@ export default function MetricUsage({
               onSortingChange={dashboardsState.setSorting}
               onFilterChange={dashboardsState.setFilter}
               onPaginationChange={dashboardsState.setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                dashboardsState.setPage(1);
+              }}
             />
           </TabsContent>
         </Tabs>

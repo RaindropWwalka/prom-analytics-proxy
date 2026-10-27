@@ -95,7 +95,7 @@ export default function QueriesPage() {
   );
   const [searchQuery, setSearchQuery] = useSearchState(SEARCH_QUERY_KEY, "");
   const [page, setPage] = useSearchNumberState(PAGE_KEY, 1);
-  const [pageSize] = useSearchNumberState(PAGE_SIZE_KEY, 10);
+  const [pageSize, setPageSize] = useSearchNumberState(PAGE_SIZE_KEY, 10);
   const debouncedSearch = useDebounce(searchQuery, 750);
 
   const [sorting, setSorting] = useState<SortingState>([
@@ -112,6 +112,11 @@ export default function QueriesPage() {
 
   const handlePaginationChange = (page: number) => {
     setPage(page);
+  };
+
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size);
+    setPage(1);
   };
 
   const { data, isLoading } = useQuery<PagedResult<QueryExpression>>({
@@ -186,6 +191,7 @@ export default function QueriesPage() {
           onSortingChange={handleSortingChange}
           onFilterChange={handleFilterChange}
           onPaginationChange={handlePaginationChange}
+          onPageSizeChange={handlePageSizeChange}
           onRowClick={(row) =>
             setSelectedQuery(
               JSON.stringify({
