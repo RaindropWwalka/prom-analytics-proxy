@@ -87,17 +87,18 @@ export function MetricsTable({
     });
   };
 
+  // Name and description have no fixed width: they share whatever the
+  // narrow columns leave, so the table follows the window's width.
   const columns: LegacyColumnDef<MetricMetadata>[] = [
     {
       accessorKey: "name",
-      size: 200,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title="Metric Name" />
       ),
       cell: ({ row }) => {
         return (
           <div
-            className="font-medium max-w-[200px] truncate cursor-pointer hover:text-blue-500"
+            className="font-medium truncate cursor-pointer hover:text-blue-500"
             title={row.getValue("name")}
             onClick={(e) => {
               e.stopPropagation();
@@ -119,20 +120,19 @@ export function MetricsTable({
     },
     {
       accessorKey: "help",
-      size: 250,
       header: "Description",
       cell: ({ row }) => <MetricDescription metric={row.original} />,
     },
     {
       accessorKey: "sources",
-      size: 160,
+      size: 150,
       header: "Sources",
       enableSorting: false,
       cell: ({ row }) => <MetricSources sources={row.original.sources} />,
     },
     {
       accessorKey: "alertCount",
-      size: 80,
+      size: 70,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title="Alerts" />
       ),
@@ -142,7 +142,7 @@ export function MetricsTable({
     },
     {
       accessorKey: "recordCount",
-      size: 90,
+      size: 80,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title="Records" />
       ),
@@ -152,7 +152,7 @@ export function MetricsTable({
     },
     {
       accessorKey: "dashboardCount",
-      size: 110,
+      size: 100,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title="Dashboards" />
       ),
@@ -164,7 +164,7 @@ export function MetricsTable({
     },
     {
       accessorKey: "queryCount",
-      size: 120,
+      size: 110,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title="Queries (30d)" />
       ),
