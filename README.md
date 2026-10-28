@@ -251,6 +251,8 @@ Commands:
 Flags (api):
   -config-file string
     	Path to the configuration file, it takes precedence over the command line flags.
+  -database-connect-in-background
+    	Start even when the database is unreachable and keep retrying it in the background; queries are proxied unrecorded meanwhile.
   -database-provider string
     	The provider of database to use for storing query data. Supported values: postgresql, sqlite.
   -include-query-stats

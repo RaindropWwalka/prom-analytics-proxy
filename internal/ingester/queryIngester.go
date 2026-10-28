@@ -2,6 +2,7 @@ package ingester
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -173,6 +174,12 @@ func (i *QueryIngester) ingest(ctx context.Context, queries []db.Query) {
 	traceContext, span := otel.Tracer("query-ingester").Start(ingestCtx, "ingest")
 	defer span.End()
 	err := i.dbProvider.Insert(traceContext, queries)
+	if errors.Is(err, db.ErrDatabaseUnavailable) {
+		// Started without the database (database.connect_in_background):
+		// dropped quietly, not once per batch, until it connects.
+		slog.Debug("database not connected yet, dropping queries", "queries", len(queries))
+		return
+	}
 	if err != nil {
 		slog.Error("unable to insert query", "err", err)
 		return
