@@ -22,6 +22,12 @@ type fakeProvider struct {
 	deleteResults []int64
 	deleteErrors  []error
 	callIndex     int
+	recordedRuns  int
+}
+
+func (f *fakeProvider) SetJobLastRun(context.Context, string, time.Time) error {
+	f.recordedRuns++
+	return nil
 }
 
 func (f *fakeProvider) DeleteQueriesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
@@ -175,6 +181,25 @@ func TestWorker_RunOnce(t *testing.T) {
 		diff = -diff
 	}
 	assert.Less(t, diff, 1*time.Second, "cutoff should be approximately now - queriesMaxAge")
+}
+
+// TestWorker_RecordsOnlySuccessfulRuns: a cleanup that failed isn't
+// recorded, so the next leader retries it at once.
+func TestWorker_RecordsOnlySuccessfulRuns(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want int
+	}{{nil, 1}, {errors.New("db down"), 0}} {
+		fakeProv := &fakeProvider{deleteResults: []int64{1}, deleteErrors: []error{tc.err}}
+		w := &Worker{
+			dbProvider:    fakeProv,
+			runTimeout:    time.Minute,
+			queriesMaxAge: time.Hour,
+			runDuration:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "test_duration"}, []string{"status"}),
+		}
+		w.RunOnce(context.Background())
+		assert.Equal(t, tc.want, fakeProv.recordedRuns, "delete error: %v", tc.err)
+	}
 }
 
 func TestWorker_RunOnce_Error(t *testing.T) {

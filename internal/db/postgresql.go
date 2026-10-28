@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -2014,4 +2015,27 @@ func (p *PostGreSQLProvider) DeleteQueriesBefore(ctx context.Context, cutoff tim
 		return 0, ErrorWithOperation(err, "get rows affected")
 	}
 	return rowsAffected, nil
+}
+
+func (p *PostGreSQLProvider) GetJobLastRun(ctx context.Context, name string) (time.Time, bool, error) {
+	var unix int64
+	err := p.db.QueryRowContext(ctx, `SELECT finished_at_unix FROM job_runs WHERE name = $1`, name).Scan(&unix)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, ErrorWithOperation(err, "get job last run")
+	}
+	return time.Unix(unix, 0).UTC(), true, nil
+}
+
+func (p *PostGreSQLProvider) SetJobLastRun(ctx context.Context, name string, at time.Time) error {
+	_, err := p.db.ExecContext(ctx, `
+        INSERT INTO job_runs (name, finished_at_unix) VALUES ($1, $2)
+        ON CONFLICT (name) DO UPDATE SET finished_at_unix = EXCLUDED.finished_at_unix
+    `, name, at.Unix())
+	if err != nil {
+		return ErrorWithOperation(err, "set job last run")
+	}
+	return nil
 }

@@ -312,3 +312,64 @@ func TestPeriodicJob_PanickingCycleEndsItsReportedContextAndPropagates(t *testin
 			"a panicking cycle's reported context must end like any other, or a budget check would keep watching a cycle that is long gone")
 	})
 }
+
+// TestPeriodicJob_FirstCycleWaitsUntilDue: a leader taking over shortly after
+// the last successful cycle holds its first one back until it's due.
+func TestPeriodicJob_FirstCycleWaitsUntilDue(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var first time.Time
+		var calls atomic.Int32
+		job := PeriodicJob(time.Hour, time.Hour, func(context.Context) {
+			if calls.Add(1) == 1 {
+				first = time.Now()
+			}
+		}, WithFirstCycleDue(func(context.Context) time.Time { return start.Add(40 * time.Minute) }))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Minute)
+		defer cancel()
+		job(ctx, nil)
+
+		assert.Equal(t, int32(1), calls.Load(), "the next one is an interval after the first, past the deadline")
+		assert.Equal(t, 40*time.Minute, first.Sub(start))
+	})
+}
+
+// TestPeriodicJob_FirstCycleRunsAtOnceWhenOverdue: a due time already past
+// changes nothing.
+func TestPeriodicJob_FirstCycleRunsAtOnceWhenOverdue(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var first time.Time
+		job := PeriodicJob(time.Hour, time.Hour, func(context.Context) {
+			if first.IsZero() {
+				first = time.Now()
+			}
+		}, WithFirstCycleDue(func(context.Context) time.Time { return start.Add(-time.Hour) }))
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		job(ctx, nil)
+
+		assert.Equal(t, start, first)
+	})
+}
+
+// TestPeriodicJob_StopsWhileWaitingForTheFirstCycle: losing leadership while
+// waiting returns without running anything.
+func TestPeriodicJob_StopsWhileWaitingForTheFirstCycle(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		job := PeriodicJob(time.Hour, time.Hour, func(context.Context) { calls.Add(1) },
+			WithFirstCycleDue(func(context.Context) time.Time { return time.Now().Add(time.Hour) }))
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		job(ctx, nil)
+
+		assert.Zero(t, calls.Load())
+	})
+}

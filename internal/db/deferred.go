@@ -350,3 +350,19 @@ func (d *DeferredProvider) DeleteQueriesBefore(ctx context.Context, cutoff time.
 	}
 	return p.DeleteQueriesBefore(ctx, cutoff)
 }
+
+func (d *DeferredProvider) GetJobLastRun(ctx context.Context, name string) (time.Time, bool, error) {
+	p, err := d.current()
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return p.GetJobLastRun(ctx, name)
+}
+
+func (d *DeferredProvider) SetJobLastRun(ctx context.Context, name string, at time.Time) error {
+	p, err := d.current()
+	if err != nil {
+		return err
+	}
+	return p.SetJobLastRun(ctx, name, at)
+}

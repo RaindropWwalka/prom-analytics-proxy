@@ -533,3 +533,40 @@ func TestProcessJob_WithoutServiceLabelQueriesNamesOnly(t *testing.T) {
 
 	assert.Equal(t, []string{`count({job="node", __name__=~".+"}) by (__name__)`}, api.queries)
 }
+
+// TestSyncer_RecordsSuccessfulRuns: a completed sync and its job index step
+// are recorded, so the next leader knows when they last ran.
+func TestSyncer_RecordsSuccessfulRuns(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		provider := &fakeProvider{}
+		s := defaultBudgetSyncer(provider, oneJobAPI())
+		s.RunOnce(context.Background())
+
+		provider.mu.Lock()
+		defer provider.mu.Unlock()
+		assert.Contains(t, provider.runs, InventoryRunName)
+		assert.Contains(t, provider.runs, JobIndexRunName)
+	})
+}
+
+// TestSyncer_SkipsAFreshJobIndex: with job_index_refresh_interval, a job
+// index younger than it isn't rebuilt; an older one is.
+func TestSyncer_SkipsAFreshJobIndex(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		provider := &fakeProvider{runs: map[string]time.Time{JobIndexRunName: time.Now().Add(-time.Hour)}}
+		s := defaultBudgetSyncer(provider, oneJobAPI())
+		s.jobIndexRefreshInterval = 24 * time.Hour
+		s.RunOnce(context.Background())
+
+		provider.mu.Lock()
+		assert.Zero(t, provider.upsertCalls, "an hour-old index isn't due")
+		assert.Contains(t, provider.runs, InventoryRunName, "the sync itself still completed")
+		provider.runs[JobIndexRunName] = time.Now().Add(-25 * time.Hour)
+		provider.mu.Unlock()
+
+		s.RunOnce(context.Background())
+		provider.mu.Lock()
+		defer provider.mu.Unlock()
+		assert.Equal(t, 1, provider.upsertCalls, "a day-old index is rebuilt")
+	})
+}

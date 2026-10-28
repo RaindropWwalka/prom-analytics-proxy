@@ -155,6 +155,9 @@ type fakeProvider struct {
 	// either way.
 	upsertCalls int
 	upsertDelay time.Duration // how long a real job-index upsert would take
+
+	// runs is each recorded run's last success (db.SetJobLastRun).
+	runs map[string]time.Time
 	// upsertErr, if set, is returned instead of succeeding for the one job
 	// named upsertErrForJob - every other job's upsert still succeeds.
 	upsertErr       error
@@ -243,4 +246,21 @@ func newCounter() prometheus.Counter {
 
 func newHistogram() prometheus.Histogram {
 	return prometheus.NewHistogram(prometheus.HistogramOpts{Name: "test_histogram"})
+}
+
+func (f *fakeProvider) GetJobLastRun(_ context.Context, name string) (time.Time, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	at, ok := f.runs[name]
+	return at, ok, nil
+}
+
+func (f *fakeProvider) SetJobLastRun(_ context.Context, name string, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.runs == nil {
+		f.runs = map[string]time.Time{}
+	}
+	f.runs[name] = at
+	return nil
 }

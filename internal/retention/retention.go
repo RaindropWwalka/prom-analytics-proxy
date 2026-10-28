@@ -74,4 +74,17 @@ func (w *Worker) RunOnce(ctx context.Context) {
 
 	slog.Info("retention: cleanup complete", "deleted", deleted, "cutoff", cutoff)
 	w.runDuration.WithLabelValues("success").Observe(time.Since(start).Seconds())
+	if err := w.dbProvider.SetJobLastRun(runCtx, RunName, time.Now()); err != nil {
+		slog.Warn("retention: unable to record run", "err", err)
+	}
+}
+
+// RunName is what the worker records its successful runs under
+// (db.SetJobLastRun).
+const RunName = "retention"
+
+// LastSuccess is when a cleanup last completed, read back across restarts so
+// a new leader doesn't start one the previous leader just finished.
+func (w *Worker) LastSuccess(ctx context.Context) (time.Time, bool, error) {
+	return w.dbProvider.GetJobLastRun(ctx, RunName)
 }

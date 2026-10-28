@@ -552,6 +552,8 @@ inventory:
   job_index_timeout: 210s    # Timeout for the job index step as a whole (default: 210s)
   job_index_label_timeout: 30s   # Timeout for job label fetch (default: 30s)
   job_index_per_job_timeout: 30s # Timeout for one job's whole turn - query and commit (default: 30s)
+  job_index_refresh_interval: 0s # Skip the job index step while its last success is younger than this
+                             # (default: 0, every sync)
   job_index_workers: 10      # Number of concurrent workers for job processing (default: 10)
 ```
 
