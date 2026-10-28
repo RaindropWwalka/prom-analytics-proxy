@@ -6,7 +6,7 @@
 
 `internal/inventory.Syncer` maintains two tables: the metrics catalog (name, type, help, unit — what metrics exist) and, optionally, a per-Prometheus-job index (which metrics each job produces), used to answer job-scoped "which of this job's metrics are unused" queries. One call to `RunOnce` runs up to three independent steps, strictly in this order:
 
-1. **Metadata catalog sync** — populates the catalog from Prometheus. Skipped entirely if `metadata_sync_enabled` is `false` (the OTLP ingester populates the catalog instead in that mode — see [docs/ingester.md](ingester.md)). Two mutually exclusive sources, selected by `metadata_metrics_name_only`: the `/api/v1/metadata` endpoint by default (full type/help/unit; expands histograms and summaries into their `_bucket`/`_count`/`_sum` series; capped by the top-level `metadata_limit`), or `/api/v1/label/__name__/values` when set (names only — lighter, and less prone to hitting Prometheus's own metadata limits, at the cost of a less complete catalog). Bounded by `metadata_step_timeout`.
+1. **Metadata catalog sync** — populates the catalog from Prometheus. Skipped entirely if `metadata_sync_enabled` is `false` (the OTLP ingester populates the catalog instead in that mode — see [docs/ingester.md](ingester.md)). Two mutually exclusive sources, selected by `metadata_metrics_name_only`: the `/api/v1/metadata` endpoint by default (full type/help/unit; expands histograms and summaries into their `_bucket`/`_count`/`_sum` series; capped by the top-level `metadata_limit`), or `/api/v1/label/__name__/values` when set (names only — lighter, and less prone to hitting Prometheus's own metadata limits, at the cost of a less complete catalog). Read from the upstream by default, or from every entry in `metadata_sources` when that is set (see [Metadata sources](#metadata-sources)). Bounded by `metadata_step_timeout`.
 2. **Usage-summary refresh** — always runs, never gated by a flag. Bounded by its own `summary_step_timeout`.
 3. **Job index sync** (`internal/inventory/job_index.go`) — only if `job_sync_enabled`, and only after steps 1–2 both succeed. Fetches the set of Prometheus job label values, then fans out across `job_index_workers` concurrent goroutines, each pulling jobs off a shared channel and querying-then-upserting one job's metric names at a time. Bounded as a *whole* by `job_index_timeout`; the label fetch (`job_index_label_timeout`) and each job's own turn — its query and its commit both (`job_index_per_job_timeout`) — are sub-budgets nested inside it, not independent of it, so one job stuck on a slow query or a database lock costs its own budget rather than the whole step's. An empty label result or a 404 is treated as "no job labels exist" and logged, not an error; the step overall fails only if more than half of the individual jobs failed.
 
@@ -29,6 +29,9 @@ Settled this way, `run_timeout` is a true bound on one whole cycle rather than o
 | `enabled` | `-inventory-enabled` | `true` | Whether this job runs at all |
 | `metadata_sync_enabled` | `-inventory-metadata-sync-enabled` | `true` | Whether step 1 runs (and counts toward `run_timeout`'s required minimum) |
 | `metadata_metrics_name_only` | — (YAML only) | `false` | Which source step 1 uses |
+| `metadata_sources` | — (YAML only) | none | Where step 1 reads from instead of the upstream — see [Metadata sources](#metadata-sources) |
+| `metadata_source_workers` | — (YAML only) | `4` | How many `metadata_sources` step 1 reads at once |
+| `metadata_source_timeout` | — (YAML only) | `1m` | Bounds one source's read, nested inside `metadata_step_timeout`; `0s` leaves each read bounded by `metadata_step_timeout` alone |
 | `sync_interval` | `-inventory-sync-interval` | `10m` | Time between cycles (jittered up to 20%, so replicas restarting together don't all sync in lockstep) |
 | `time_window` | `-inventory-time-window` | `720h` (30d) | Lookback window for the usage-summary refresh and job-index queries |
 | `run_timeout` | `-inventory-run-timeout` | `300s` | The whole cycle's real deadline — must be at least the sum of every enabled step's own timeout below plus `10s` of overrun allowance per enabled step; a smaller value is raised to that floor at startup, with a warning naming it |
@@ -40,12 +43,29 @@ Settled this way, `run_timeout` is a true bound on one whole cycle rather than o
 | `job_index_per_job_timeout` | `-inventory-job-index-per-job-timeout` | `30s` | Bounds one job's whole turn — its query and its commit — nested inside `job_index_timeout` |
 | `job_index_workers` | `-inventory-job-index-workers` | `10` | Concurrency of step 3's per-job fan-out |
 
+### Metadata sources
+
+Step 1 reads the upstream by default. That doesn't work when the upstream can't serve metadata: Thanos Receive, for one, keeps none, so a Querier in front of it answers `/api/v1/metadata` with an empty result, while the Prometheus servers remote-writing into it still could. `metadata_sources` points step 1 at those servers instead; queries, step 2 and step 3 keep going through the upstream.
+
+```yaml
+inventory:
+  metadata_sources:
+  - url: http://prometheus.monitoring.svc:9090
+  - url: https://prometheus.other-cluster.example.com
+    basic_auth:
+      username: reader
+      password_file: /etc/secrets/prometheus-password
+```
+
+Each entry is a `url` plus the HTTP client block Prometheus itself uses (`basic_auth`, `authorization`, `oauth2`, `tls_config`, `proxy_url`, ...). Sources are read in config order, `metadata_source_workers` at a time — so a long list doesn't land every response in memory at once — all within the one `metadata_step_timeout`; `metadata_source_timeout`, when set, bounds each read, so a source that hangs gives up its worker instead of holding it until the step times out and starving the sources queued behind it. Size `metadata_step_timeout` for the sources one worker takes in turn, not for a single read. The results are merged — for a metric several sources know, the first source in config order that has its type wins, so a source without metadata for it never blanks out one that has it — and the merged catalog is committed in one upsert. A source that fails costs only its own metrics: the step still commits what the others returned, and fails only if none answered. Every source's outcome is logged as soon as it has one — `inventory: metadata source read` with how many metrics it returned and how long it took, or `inventory: metadata source failed` with the error, a source timeout named as such — rather than once the step ends, which with tens of sources can be many minutes later; each failure is also counted in `inventory_metadata_source_failure_total`.
+
 ### Metrics
 
 - `inventory_sync_duration_seconds` (histogram) — wall time of one `RunOnce` call, observed once regardless of outcome.
 - `inventory_sync_success_total` / `inventory_sync_failure_total` (counters) — steps 1–2's outcome only; step 3 isn't reflected here.
 - `inventory_catalog_summary_mismatch_total` (counter) — the catalog-committed-but-summary-failed partial-failure case specifically.
 - `inventory_job_index_failure_total` (counter) — step 3 failed, so the index is stale for the jobs it couldn't reach, while the run itself still counted as a success. Alert on this rather than on the success counter, which by design says nothing about step 3.
+- `inventory_metadata_source_failure_total` (counter, label `source`) — a `metadata_sources` entry couldn't be read in a cycle's step 1. The catalog was still committed from the others unless every source failed, in which case the run is counted as a failure too. The label is the source's URL with any password redacted.
 
 ## Retention worker
 

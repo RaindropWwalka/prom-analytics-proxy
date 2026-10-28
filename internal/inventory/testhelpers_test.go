@@ -117,6 +117,7 @@ type fakeProvider struct {
 	mu sync.Mutex
 
 	catalogCommits int
+	catalogItems   []db.MetricCatalogItem // what the last catalog commit carried
 
 	summaryDelay     time.Duration // how long a real refresh would take
 	summaryCalls     int
@@ -136,10 +137,11 @@ type fakeProvider struct {
 	upsertErrForJob string
 }
 
-func (f *fakeProvider) UpsertMetricsCatalog(_ context.Context, _ []db.MetricCatalogItem) error {
+func (f *fakeProvider) UpsertMetricsCatalog(_ context.Context, items []db.MetricCatalogItem) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.catalogCommits++
+	f.catalogItems = items
 	return nil
 }
 

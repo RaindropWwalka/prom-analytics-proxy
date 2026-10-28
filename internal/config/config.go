@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
+	promconfig "github.com/prometheus/common/config"
 	"github.com/thanos-io/thanos/pkg/tracing/otlp"
 	yaml "gopkg.in/yaml.v3"
 )
@@ -122,12 +124,28 @@ type InventoryConfig struct {
 	// MetadataMetricsNameOnly ensure that /api/v1/label/__name__/values API is used instead of /api/v1/metadata
 	// This gives lighter inventory queries less prone to fail due to metadata limits in Prometheus, but may result
 	// in less complete inventory (no unit, type, ...).
-	MetadataMetricsNameOnly bool          `yaml:"metadata_metrics_name_only,omitempty"`
-	SyncInterval            time.Duration `yaml:"sync_interval,omitempty"`
-	TimeWindow              time.Duration `yaml:"time_window,omitempty"`
-	RunTimeout              time.Duration `yaml:"run_timeout,omitempty"`
-	MetadataStepTimeout     time.Duration `yaml:"metadata_step_timeout,omitempty"`
-	SummaryStepTimeout      time.Duration `yaml:"summary_step_timeout,omitempty"`
+	MetadataMetricsNameOnly bool `yaml:"metadata_metrics_name_only,omitempty"`
+	// MetadataSources, when set, are the Prometheus-compatible APIs the
+	// catalog step reads instead of the upstream: every source is queried
+	// and the results are merged into one catalog. Useful when the upstream
+	// can't serve metadata itself (Thanos Receive, for instance, keeps none),
+	// while the Prometheus servers writing into it still can. Only the
+	// catalog step reads these; queries, the summary and the job index keep
+	// going through the upstream.
+	MetadataSources []MetadataSourceConfig `yaml:"metadata_sources,omitempty"`
+	// MetadataSourceWorkers caps how many metadata sources are read at
+	// once, so a long list doesn't land every response in memory together.
+	MetadataSourceWorkers int `yaml:"metadata_source_workers,omitempty"`
+	// MetadataSourceTimeout bounds one source's read, so a source that
+	// hangs gives up its worker instead of holding it until the whole step
+	// times out. Zero leaves each read bounded by MetadataStepTimeout alone.
+	// Defaults to a minute: a healthy Prometheus answers in seconds.
+	MetadataSourceTimeout time.Duration `yaml:"metadata_source_timeout,omitempty"`
+	SyncInterval          time.Duration `yaml:"sync_interval,omitempty"`
+	TimeWindow            time.Duration `yaml:"time_window,omitempty"`
+	RunTimeout            time.Duration `yaml:"run_timeout,omitempty"`
+	MetadataStepTimeout   time.Duration `yaml:"metadata_step_timeout,omitempty"`
+	SummaryStepTimeout    time.Duration `yaml:"summary_step_timeout,omitempty"`
 	// JobSyncEnabled controls whether the syncer fetches job metadata from
 	// Prometheus and populates job_index. Set to false when you want to avoid heavy job queries.
 	JobSyncEnabled bool `yaml:"job_sync_enabled,omitempty"`
@@ -142,6 +160,47 @@ type InventoryConfig struct {
 	JobIndexLabelTimeout  time.Duration `yaml:"job_index_label_timeout,omitempty"`
 	JobIndexPerJobTimeout time.Duration `yaml:"job_index_per_job_timeout,omitempty"`
 	JobIndexWorkers       int           `yaml:"job_index_workers,omitempty"`
+}
+
+// MetadataSourceConfig is one Prometheus-compatible API the catalog step
+// reads metadata (or metric names) from. HTTPClientConfig is the same block
+// Prometheus uses for its own clients, so basic_auth, authorization,
+// tls_config and proxy settings read the way they do there.
+type MetadataSourceConfig struct {
+	URL              string                      `yaml:"url"`
+	HTTPClientConfig promconfig.HTTPClientConfig `yaml:",inline"`
+}
+
+// UnmarshalYAML starts from Prometheus's own HTTP client defaults: an inline
+// field is decoded in place, so HTTPClientConfig's own unmarshaller - the
+// thing that would otherwise apply them - never runs.
+func (c *MetadataSourceConfig) UnmarshalYAML(value *yaml.Node) error {
+	type plain MetadataSourceConfig
+	raw := plain{HTTPClientConfig: promconfig.DefaultHTTPClientConfig}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*c = MetadataSourceConfig(raw)
+	return nil
+}
+
+// Validate checks what NewSyncer would otherwise only find out about on
+// its first cycle.
+func (c MetadataSourceConfig) Validate() error {
+	if c.URL == "" {
+		return errors.New("url is required")
+	}
+	u, err := url.Parse(c.URL)
+	if err != nil {
+		return fmt.Errorf("url %q: %w", c.URL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("url %q: scheme must be http or https", c.URL)
+	}
+	if err := c.HTTPClientConfig.Validate(); err != nil {
+		return fmt.Errorf("url %q: %w", c.URL, err)
+	}
+	return nil
 }
 
 type RetentionConfig struct {
@@ -189,6 +248,8 @@ var DefaultConfig = &Config{
 		Enabled:                 true,
 		MetadataSyncEnabled:     true,
 		MetadataMetricsNameOnly: false,
+		MetadataSourceWorkers:   4,
+		MetadataSourceTimeout:   time.Minute,
 		SyncInterval:            10 * time.Minute,
 		TimeWindow:              30 * 24 * time.Hour,
 		RunTimeout:              300 * time.Second,
@@ -453,6 +514,19 @@ func (c InventoryConfig) Validate() error {
 			errs = append(errs, fmt.Errorf("inventory.%s must be positive (got: %s)", f.name, f.value))
 		}
 	}
+	if c.MetadataSyncEnabled && len(c.MetadataSources) > 0 {
+		if c.MetadataSourceWorkers <= 0 {
+			errs = append(errs, fmt.Errorf("inventory.metadata_source_workers must be positive (got: %d)", c.MetadataSourceWorkers))
+		}
+		if c.MetadataSourceTimeout < 0 {
+			errs = append(errs, fmt.Errorf("inventory.metadata_source_timeout must not be negative (got: %s)", c.MetadataSourceTimeout))
+		}
+		for i, src := range c.MetadataSources {
+			if err := src.Validate(); err != nil {
+				errs = append(errs, fmt.Errorf("inventory.metadata_sources[%d]: %w", i, err))
+			}
+		}
+	}
 	// Without a worker there's nothing to pull jobs off the fan-out channel,
 	// and the step reports success having indexed nothing.
 	if c.JobSyncEnabled && c.JobIndexWorkers <= 0 {
@@ -640,6 +714,9 @@ func logInventoryConfig(cfg *Config) {
 		"Inventory.Enabled", cfg.Inventory.Enabled,
 		"Inventory.MetadataSyncEnabled", cfg.Inventory.MetadataSyncEnabled,
 		"Inventory.MetadataMetricsNameOnly", cfg.Inventory.MetadataMetricsNameOnly,
+		"Inventory.MetadataSources", len(cfg.Inventory.MetadataSources),
+		"Inventory.MetadataSourceWorkers", cfg.Inventory.MetadataSourceWorkers,
+		"Inventory.MetadataSourceTimeout", cfg.Inventory.MetadataSourceTimeout,
 		"Inventory.SyncInterval", cfg.Inventory.SyncInterval,
 		"Inventory.TimeWindow", cfg.Inventory.TimeWindow,
 		"Inventory.RunTimeout", cfg.Inventory.RunTimeout,

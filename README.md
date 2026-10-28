@@ -519,6 +519,12 @@ inventory:
   enabled: true              # Enable inventory syncing (default: true)
   metadata_sync_enabled: true # Fetch metric metadata from Prometheus to populate the catalog (default: true)
                              # Set to false when using the OTLP ingester to populate the catalog instead.
+  metadata_sources: []       # Prometheus APIs to read the catalog from instead of the upstream (default: none)
+                             # Each entry takes a url plus Prometheus's HTTP client settings
+                             # (basic_auth, authorization, tls_config, ...). See docs/jobs.md.
+  metadata_source_workers: 4 # How many metadata_sources are read at once (default: 4)
+  metadata_source_timeout: 1m # Timeout for reading one metadata source; 0 = bounded by
+                             # metadata_step_timeout alone (default: 1m)
   sync_interval: 10m         # How often to sync inventory (default: 10m)
   time_window: 720h          # Time window for usage analysis (default: 30 days)
   run_timeout: 300s          # Timeout for an entire sync run (default: 300s)
