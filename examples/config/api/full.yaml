@@ -3,7 +3,7 @@
 # Server
 server:
   insecure_listen_address: ":9091" # The address the prom-analytics-proxy proxy HTTP server should listen on. (default ":9091")
-  push_metrics_usage_timeout: time.Duration # Timeout for PushMetricsUsage API endpoint. (default 30s)
+  push_metrics_usage_timeout: time.Duration # Timeout for writing one pushed metrics usage payload. (default 30s)
 
 upstream:
   url: "http://prometheus.monitoring.svc.cluster.local:9090" # The URL of the upstream Prometheus API.
