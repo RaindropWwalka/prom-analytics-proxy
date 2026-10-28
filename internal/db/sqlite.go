@@ -1057,9 +1057,10 @@ func (p *SQLiteProvider) UpsertMetricsJobIndex(ctx context.Context, items []Metr
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO metrics_job_index(name, job, updated_at)
-		VALUES(?, ?, datetime('now'))
+		INSERT INTO metrics_job_index(name, job, series, updated_at)
+		VALUES(?, ?, ?, datetime('now'))
 		ON CONFLICT(name, job) DO UPDATE SET
+			series = excluded.series,
 			updated_at = excluded.updated_at
 	`)
 	if err != nil {
@@ -1068,7 +1069,7 @@ func (p *SQLiteProvider) UpsertMetricsJobIndex(ctx context.Context, items []Metr
 	}
 	defer CloseResource(stmt)
 	for _, it := range items {
-		if _, err := stmt.ExecContext(ctx, it.Name, it.Job); err != nil {
+		if _, err := stmt.ExecContext(ctx, it.Name, it.Job, nullSeries(it.Series)); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("exec: %w", err)
 		}
@@ -1169,13 +1170,22 @@ func (p *SQLiteProvider) GetMetricsCardinality(ctx context.Context, names []stri
 		return map[string]map[string]int{}, nil
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
-	args := make([]any, len(names))
-	for i, n := range names {
-		args[i] = n
+	args := make([]any, 0, 2*len(names)+1)
+	for _, n := range names {
+		args = append(args, n)
+	}
+	args = append(args, UpstreamSeriesSource)
+	for _, n := range names {
+		args = append(args, n)
 	}
 	rows, err := ExecuteQuery(ctx, p.db, `
         SELECT name, source, series FROM metrics_cardinality
         WHERE name IN (`+placeholders+`)
+        UNION ALL
+        SELECT j.name, ?, SUM(j.series) FROM metrics_job_index j
+        WHERE j.name IN (`+placeholders+`) AND j.series IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM metrics_cardinality k WHERE k.name = j.name)
+        GROUP BY j.name
     `, args...)
 	if err != nil {
 		return nil, err

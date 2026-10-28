@@ -17,19 +17,31 @@ import (
 // service produces under several jobs counts once per service.
 //
 // Series come from metrics_cardinality: per (metric, source) when grouped by
-// source, else the metric's series summed over sources. A metric outside
-// every source's recorded top-N counts as 0 series, and a metric shared by
-// several jobs or services counts its whole series under each of them.
+// source, else the metric's series summed over sources (metricSeriesSQL). A
+// metric outside every source's recorded top-N falls back to its series
+// summed over the job index, counted in the upstream; grouped by source it counts
+// as 0. Grouped by job alone, each job takes its own series of the metric
+// from the job index; otherwise a metric shared by several jobs or services
+// counts its whole series under each of them.
 const (
+	metricSeriesSQL = `
+        SELECT name, SUM(series) AS series FROM (
+          SELECT name, series FROM metrics_cardinality
+          UNION ALL
+          SELECT j.name, j.series FROM metrics_job_index j
+          WHERE j.series IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM metrics_cardinality mc WHERE mc.name = j.name)
+        ) t GROUP BY name`
+
 	pgUnusedByJobSQL = `
         SELECT j.job, '' AS service, '' AS source, COUNT(*),
                SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
-               COALESCE(SUM(k.series), 0),
-               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+               COALESCE(SUM(COALESCE(j.series, k.series)), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN COALESCE(j.series, k.series) ELSE 0 END), 0)
         FROM metrics_job_index j
         JOIN metrics_catalog c ON c.name = j.name
         JOIN metrics_usage_summary s ON s.name = j.name
-        LEFT JOIN (SELECT name, SUM(series) AS series FROM metrics_cardinality GROUP BY name) k ON k.name = c.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
         WHERE c.last_synced_at >= $1
           AND ($2 = '' OR j.job = $2)
         GROUP BY j.job
@@ -70,7 +82,7 @@ const (
         FROM (SELECT DISTINCT name, service FROM metrics_service_index) svc
         JOIN metrics_catalog c ON c.name = svc.name
         JOIN metrics_usage_summary s ON s.name = svc.name
-        LEFT JOIN (SELECT name, SUM(series) AS series FROM metrics_cardinality GROUP BY name) k ON k.name = c.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
         WHERE c.last_synced_at >= $1
           AND ($2 = '' OR svc.service = $2)
         GROUP BY svc.service
@@ -93,12 +105,12 @@ const (
 	sqliteUnusedByJobSQL = `
         SELECT j.job, '' AS service, '' AS source, COUNT(*),
                SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
-               COALESCE(SUM(k.series), 0),
-               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+               COALESCE(SUM(COALESCE(j.series, k.series)), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN COALESCE(j.series, k.series) ELSE 0 END), 0)
         FROM metrics_job_index j
         JOIN metrics_catalog c ON c.name = j.name
         JOIN metrics_usage_summary s ON s.name = j.name
-        LEFT JOIN (SELECT name, SUM(series) AS series FROM metrics_cardinality GROUP BY name) k ON k.name = c.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
         WHERE c.last_synced_at >= ?
           AND (? = '' OR j.job = ?)
         GROUP BY j.job
@@ -139,7 +151,7 @@ const (
         FROM (SELECT DISTINCT name, service FROM metrics_service_index) svc
         JOIN metrics_catalog c ON c.name = svc.name
         JOIN metrics_usage_summary s ON s.name = svc.name
-        LEFT JOIN (SELECT name, SUM(series) AS series FROM metrics_cardinality GROUP BY name) k ON k.name = c.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
         WHERE c.last_synced_at >= ?
           AND (? = '' OR svc.service = ?)
         GROUP BY svc.service
@@ -169,7 +181,7 @@ const (
         FROM metrics_service_index svc
         JOIN metrics_catalog c ON c.name = svc.name
         JOIN metrics_usage_summary s ON s.name = svc.name
-        LEFT JOIN (SELECT name, SUM(series) AS series FROM metrics_cardinality GROUP BY name) k ON k.name = c.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
         WHERE c.last_synced_at >= $1
           AND ($2 = '' OR svc.job = $2)
           AND ($3 = '' OR svc.service = $3)
@@ -199,7 +211,7 @@ const (
         FROM metrics_service_index svc
         JOIN metrics_catalog c ON c.name = svc.name
         JOIN metrics_usage_summary s ON s.name = svc.name
-        LEFT JOIN (SELECT name, SUM(series) AS series FROM metrics_cardinality GROUP BY name) k ON k.name = c.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
         WHERE c.last_synced_at >= ?
           AND (? = '' OR svc.job = ?)
           AND (? = '' OR svc.service = ?)

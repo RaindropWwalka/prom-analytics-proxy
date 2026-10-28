@@ -41,6 +41,39 @@ func TestSQLite_MetricsCardinality(t *testing.T) {
 	testMetricsCardinality(t, sqliteTestBackend)
 }
 
+// testMetricsCardinalityFallsBackToJobIndex: a metric outside every source's
+// top-N takes its series summed over the job index, under
+// UpstreamSeriesSource; a metric some source counted keeps only that.
+func testMetricsCardinalityFallsBackToJobIndex(t *testing.T, b testBackend) {
+	p := b.newProvider(t)
+	ctx := context.Background()
+
+	require.NoError(t, p.ReplaceMetricsCardinality(ctx, "source-a", map[string]int{"up": 10}, time.Now()))
+	require.NoError(t, p.UpsertMetricsJobIndex(ctx, []MetricJobIndexItem{
+		{Name: "up", Job: "job-a", Series: 7},
+		{Name: "jvm_threads", Job: "job-a", Series: 30},
+		{Name: "jvm_threads", Job: "job-b", Series: 12},
+		{Name: "go_goroutines", Job: "job-a"}, // not counted yet
+	}))
+
+	got, err := p.GetMetricsCardinality(ctx, []string{"up", "jvm_threads", "go_goroutines"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]map[string]int{
+		"up":          {"source-a": 10},
+		"jvm_threads": {UpstreamSeriesSource: 42},
+	}, got)
+}
+
+func TestPostgreSQL_MetricsCardinalityFallsBackToJobIndex(t *testing.T) {
+	t.Parallel()
+	testMetricsCardinalityFallsBackToJobIndex(t, postgreSQLTestBackend)
+}
+
+func TestSQLite_MetricsCardinalityFallsBackToJobIndex(t *testing.T) {
+	t.Parallel()
+	testMetricsCardinalityFallsBackToJobIndex(t, sqliteTestBackend)
+}
+
 // testMetricsCardinalitySkipsSteadyRows pins the write saving: a count within
 // a tenth of the stored one, written recently, isn't rewritten.
 func testMetricsCardinalitySkipsSteadyRows(t *testing.T, b testBackend) {

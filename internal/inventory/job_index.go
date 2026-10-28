@@ -88,8 +88,8 @@ func (s *Syncer) syncJobIndex(ctx context.Context, tr db.TimeRange) error {
 	return nil
 }
 
-// processJob queries one job's metric names - and, with a service label,
-// which service produces each - and commits them. Both calls are
+// processJob queries one job's metric names with their series counts - and,
+// with a service label, which service produces each - and commits them. Both calls are
 // bounded by jobIndexPerJobTimeout, so a job stuck on an upstream query or a
 // database lock costs its own budget rather than the whole step's, and the
 // worker is back on the fan-out channel either way.
@@ -101,14 +101,17 @@ func (s *Syncer) processJob(ctx context.Context, job string, tr db.TimeRange, wo
 	if s.serviceLabel != "" {
 		by += ", " + s.serviceLabel
 	}
-	query := fmt.Sprintf(`group({job="%s", __name__=~".+"}) by (%s)`, job, by)
+	// count, not group: the same scan of the job's series also tells how
+	// many each metric has, which the catalog falls back on for metrics
+	// outside every source's /api/v1/status/tsdb top-N.
+	query := fmt.Sprintf(`count({job="%s", __name__=~".+"}) by (%s)`, job, by)
 	result, _, _, err := s.promAPI.Query(jobCtx, query, tr.To())
 	if err != nil {
 		slog.Warn("failed to query metrics for job", "job", job, "worker", workerID, "query", query, "err", err)
 		return err
 	}
 
-	metricNames := make(map[string]struct{})
+	metricSeries := make(map[string]int64)
 	var services []db.MetricServiceIndexItem
 
 	switch v := result.(type) {
@@ -118,7 +121,7 @@ func (s *Syncer) processJob(ctx context.Context, job string, tr db.TimeRange, wo
 			if !ok {
 				continue
 			}
-			metricNames[string(metricName)] = struct{}{}
+			metricSeries[string(metricName)] += int64(sample.Value)
 			if s.serviceLabel == "" {
 				continue
 			}
@@ -131,8 +134,8 @@ func (s *Syncer) processJob(ctx context.Context, job string, tr db.TimeRange, wo
 	}
 
 	var items []db.MetricJobIndexItem
-	for name := range metricNames {
-		items = append(items, db.MetricJobIndexItem{Name: name, Job: job})
+	for name, series := range metricSeries {
+		items = append(items, db.MetricJobIndexItem{Name: name, Job: job, Series: series})
 	}
 
 	if len(items) > 0 {

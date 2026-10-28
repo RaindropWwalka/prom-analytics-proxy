@@ -91,6 +91,27 @@ func testAnalyzeUnusedMetrics(t *testing.T, b testBackend) {
 		{Job: "api", Source: "source-a", Total: 1, Unused: 0, Series: 5, UnusedSeries: 0},
 	}, analyze(UnusedAnalysisParams{GroupBy: UnusedAnalysisByJobSource}), "per source, a source's own series")
 
+	// The job index's upstream counts: grouped by job, each job's own series.
+	mustUpsertJobIndex(t, p, []MetricJobIndexItem{
+		{Name: "m1", Job: "api", Series: 4}, {Name: "m2", Job: "api", Series: 90}, {Name: "m3", Job: "node", Series: 6},
+	})
+	assert.Equal(t, []UnusedAnalysisRow{
+		{Job: "api", Total: 2, Unused: 1, Series: 94, UnusedSeries: 90},
+		{Job: "node", Total: 1, Unused: 1, Series: 6, UnusedSeries: 6},
+	}, analyze(UnusedAnalysisParams{GroupBy: UnusedAnalysisByJob}), "per job, the job's own series")
+
+	// m3 leaves source-a's top-N: elsewhere it falls back to the job index.
+	require.NoError(t, p.ReplaceMetricsCardinality(ctx, "source-a", map[string]int{"m1": 5}, time.Now()))
+	assert.Equal(t, []UnusedAnalysisRow{
+		{Service: "billing", Total: 2, Unused: 1, Series: 105, UnusedSeries: 100},
+		{Service: "metrics", Total: 1, Unused: 1, Series: 6, UnusedSeries: 6},
+	}, analyze(UnusedAnalysisParams{GroupBy: UnusedAnalysisByService}), "head series first, then the job index")
+	assert.Equal(t, []UnusedAnalysisRow{
+		{Service: "billing", Source: "source-b", Total: 1, Unused: 1, Series: 100, UnusedSeries: 100},
+		{Service: "metrics", Source: "source-a", Total: 1, Unused: 1},
+		{Service: "billing", Source: "source-a", Total: 1, Unused: 0, Series: 5},
+	}, analyze(UnusedAnalysisParams{GroupBy: UnusedAnalysisByServiceSource}), "per source, no fallback")
+
 	_, err := p.AnalyzeUnusedMetrics(ctx, UnusedAnalysisParams{GroupBy: "pod"})
 	assert.Error(t, err)
 }

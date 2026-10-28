@@ -1291,9 +1291,10 @@ func (p *PostGreSQLProvider) UpsertMetricsJobIndex(ctx context.Context, items []
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO metrics_job_index(name, job, updated_at)
-		VALUES ($1, $2, NOW())
+		INSERT INTO metrics_job_index(name, job, series, updated_at)
+		VALUES ($1, $2, $3, NOW())
 		ON CONFLICT(name, job) DO UPDATE SET
+		  series = EXCLUDED.series,
 		  updated_at = EXCLUDED.updated_at
 	`)
 	if err != nil {
@@ -1302,7 +1303,7 @@ func (p *PostGreSQLProvider) UpsertMetricsJobIndex(ctx context.Context, items []
 	}
 	defer CloseResource(stmt)
 	for _, it := range sorted {
-		if _, err := stmt.ExecContext(ctx, it.Name, it.Job); err != nil {
+		if _, err := stmt.ExecContext(ctx, it.Name, it.Job, nullSeries(it.Series)); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("exec: %w", err)
 		}
@@ -1384,7 +1385,12 @@ func (p *PostGreSQLProvider) GetMetricsCardinality(ctx context.Context, names []
 	rows, err := ExecuteQuery(ctx, p.db, `
         SELECT name, source, series FROM metrics_cardinality
         WHERE name = ANY($1::text[])
-    `, pq.Array(names))
+        UNION ALL
+        SELECT j.name, $2::text, SUM(j.series)::bigint FROM metrics_job_index j
+        WHERE j.name = ANY($1::text[]) AND j.series IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM metrics_cardinality k WHERE k.name = j.name)
+        GROUP BY j.name
+    `, pq.Array(names), UpstreamSeriesSource)
 	if err != nil {
 		return nil, err
 	}

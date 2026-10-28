@@ -501,9 +501,9 @@ func TestProcessJob_NoMetricNamesInResult_CommitsNothing(t *testing.T) {
 func TestProcessJob_RecordsServicesFromTheSameQuery(t *testing.T) {
 	provider := &fakeProvider{}
 	api := &fakePromAPI{result: model.Vector{
-		{Metric: model.Metric{"__name__": "jvm_memory_used_bytes", "service": "billing"}},
-		{Metric: model.Metric{"__name__": "jvm_memory_used_bytes", "service": "payments"}},
-		{Metric: model.Metric{"__name__": "up"}}, // no service: indexed by job only
+		{Metric: model.Metric{"__name__": "jvm_memory_used_bytes", "service": "billing"}, Value: 12},
+		{Metric: model.Metric{"__name__": "jvm_memory_used_bytes", "service": "payments"}, Value: 30},
+		{Metric: model.Metric{"__name__": "up"}, Value: 2}, // no service: indexed by job only
 	}}
 	s := &Syncer{
 		dbProvider:            provider,
@@ -515,10 +515,10 @@ func TestProcessJob_RecordsServicesFromTheSameQuery(t *testing.T) {
 	require.NoError(t, s.processJob(context.Background(), "jmx", db.TimeRangeUntilNow(time.Hour), 0))
 
 	require.Len(t, api.queries, 1, "services must come from the job's own query, not extra ones")
-	assert.Equal(t, `group({job="jmx", __name__=~".+"}) by (__name__, service)`, api.queries[0])
+	assert.Equal(t, `count({job="jmx", __name__=~".+"}) by (__name__, service)`, api.queries[0])
 	assert.ElementsMatch(t, []db.MetricJobIndexItem{
-		{Name: "jvm_memory_used_bytes", Job: "jmx"}, {Name: "up", Job: "jmx"},
-	}, provider.jobIndexItems)
+		{Name: "jvm_memory_used_bytes", Job: "jmx", Series: 42}, {Name: "up", Job: "jmx", Series: 2},
+	}, provider.jobIndexItems, "a metric's series are summed over its services")
 	assert.ElementsMatch(t, []db.MetricServiceIndexItem{
 		{Name: "jvm_memory_used_bytes", Service: "billing", Job: "jmx"},
 		{Name: "jvm_memory_used_bytes", Service: "payments", Job: "jmx"},
@@ -531,5 +531,5 @@ func TestProcessJob_WithoutServiceLabelQueriesNamesOnly(t *testing.T) {
 
 	require.NoError(t, s.processJob(context.Background(), "node", db.TimeRangeUntilNow(time.Hour), 0))
 
-	assert.Equal(t, []string{`group({job="node", __name__=~".+"}) by (__name__)`}, api.queries)
+	assert.Equal(t, []string{`count({job="node", __name__=~".+"}) by (__name__)`}, api.queries)
 }

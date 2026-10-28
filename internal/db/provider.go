@@ -62,7 +62,8 @@ type Provider interface {
 	// of metrics whose series barely move between syncs.
 	ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int, refreshBefore time.Time) error
 	// GetMetricsCardinality returns, for each of names, its series count per
-	// source. Names no source counted are absent.
+	// source. A name no source counted falls back to its series summed over
+	// the job index, under UpstreamSeriesSource; names neither knows are absent.
 	GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error)
 	// AnalyzeUnusedMetrics counts, per job and/or source, the catalog's
 	// metrics and how many of them are unused.
@@ -342,6 +343,9 @@ type MetricCatalogItem struct {
 type MetricJobIndexItem struct {
 	Name string
 	Job  string
+	// Series is how many series of Name the job has; 0 when unknown, stored
+	// as NULL.
+	Series int64
 }
 
 type MetricServiceIndexItem struct {

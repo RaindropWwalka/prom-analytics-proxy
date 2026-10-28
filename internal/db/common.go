@@ -226,3 +226,16 @@ const serviceIndexChunk = 5000
 
 // cardinalityChunk bounds how many cardinality rows one statement writes.
 const cardinalityChunk = 5000
+
+// UpstreamSeriesSource is the source GetMetricsCardinality reports a
+// metric's job index series under - counted in the upstream - when no
+// metadata source counted it.
+const UpstreamSeriesSource = "upstream"
+
+// nullSeries stores an unknown (0) series count as NULL.
+func nullSeries(n int64) any {
+	if n <= 0 {
+		return nil
+	}
+	return n
+}
