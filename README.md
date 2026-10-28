@@ -332,7 +332,7 @@ Flags (api):
   -postgresql-user string
     	Username for the postgresql server, can also be set via POSTGRESQL_USER env var.
   -push-metrics-usage-timeout duration
-    	Timeout for PushMetricsUsage API endpoint (default 30s). (default 30s)
+    	Timeout for writing one pushed metrics usage payload (default 30s). (default 30s)
   -retention-enabled
     	Enable the retention worker to delete old data
   -retention-interval duration

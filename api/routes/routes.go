@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -29,6 +30,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/metalmatze/signal/server/signalhttp"
@@ -67,6 +69,10 @@ type routes struct {
 	seriesLimit       *uint64
 	limits            LimitsConfig
 	config            *config.Config
+
+	// usageQueue hands pushed metrics usage to writeUsage; see PushMetricsUsage.
+	usageQueue     chan usagePayload
+	usageWriterRun sync.Once
 }
 
 type Option func(*routes)
@@ -1281,27 +1287,27 @@ func writeErrorResponse(r *http.Request, w http.ResponseWriter, err error, statu
 // @Accept json
 // @Produce json
 // @Param metricsUsage body interface{} true "Metrics usage data from Perses"
-// @Success 200 {object} nil
+// @Success 202 {object} nil
 // @Failure 400 {object} models.ErrorResponse
-// @Failure 500 {object} models.ErrorResponse
+// @Failure 503 {object} models.ErrorResponse
 // @Router /api/v1/metrics [post]
 func (r *routes) PushMetricsUsage(w http.ResponseWriter, req *http.Request) {
 	usage := make(map[string]*metricsUsageV1.MetricUsage)
-
-	timeout := 10 * time.Second // fallback default
-	if r.config != nil && r.config.Server.PushMetricsUsageTimeout > 0 {
-		timeout = r.config.Server.PushMetricsUsageTimeout
-	}
-	ctx, cancel := context.WithTimeout(req.Context(), timeout)
-	defer cancel()
 
 	if err := json.NewDecoder(req.Body).Decode(&usage); err != nil {
 		writeErrorResponse(req, w, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
 		return
 	}
 
+	// One write per table for the whole payload: a rules collector pushes
+	// every metric of its Prometheus at once (~1000), and a transaction per
+	// metric doesn't fit the push timeout on a small database. The write
+	// itself is queued: collectors push the same shared rules at the same
+	// moment, so their upserts wait on each other's row locks for longer
+	// than metrics-usage's fixed 30s client timeout.
+	var rulesUsage []db.RulesUsage
+	var dashboardUsage []db.DashboardUsage
 	for name, metricUsage := range usage {
-		rulesUsage := make([]db.RulesUsage, 0, len(metricUsage.AlertRules)+len(metricUsage.RecordingRules))
 		for usage := range metricUsage.AlertRules {
 			rulesUsage = append(rulesUsage, db.RulesUsage{
 				Serie:      name,
@@ -1324,13 +1330,6 @@ func (r *routes) PushMetricsUsage(w http.ResponseWriter, req *http.Request) {
 			})
 		}
 
-		if err := r.dbProvider.InsertRulesUsage(ctx, rulesUsage); err != nil {
-			slog.Error("unable to insert rules usage", "err", err)
-			writeErrorResponse(req, w, fmt.Errorf("unable to insert rules usage: %w", err), http.StatusInternalServerError)
-			return
-		}
-
-		dashboardUsage := make([]db.DashboardUsage, 0, len(metricUsage.Dashboards))
 		for usage := range metricUsage.Dashboards {
 			dashboardUsage = append(dashboardUsage, db.DashboardUsage{
 				Serie: name,
@@ -1339,13 +1338,13 @@ func (r *routes) PushMetricsUsage(w http.ResponseWriter, req *http.Request) {
 				URL:   usage.URL,
 			})
 		}
-
-		if err := r.dbProvider.InsertDashboardUsage(ctx, dashboardUsage); err != nil {
-			slog.Error("unable to insert dashboard usage", "err", err)
-			writeErrorResponse(req, w, fmt.Errorf("unable to insert dashboard usage: %w", err), http.StatusInternalServerError)
-			return
-		}
 	}
+
+	if !r.enqueueUsage(usagePayload{rules: rulesUsage, dashboards: dashboardUsage}) {
+		writeErrorResponse(req, w, errors.New("metrics usage queue is full, retry later"), http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // @Summary Get metric usage
@@ -1662,4 +1661,51 @@ func (r *routes) metricsUnused(w http.ResponseWriter, req *http.Request) {
 	writeJSONResponse(req, w, struct {
 		Data []models.UnusedMetric `json:"data"`
 	}{Data: items})
+}
+
+// usagePayload is one pushed metrics usage request, ready to write.
+type usagePayload struct {
+	rules      []db.RulesUsage
+	dashboards []db.DashboardUsage
+}
+
+// usageQueueSize bounds the pushes waiting to be written: one per collector
+// (each rules collector and the dashboard collector) leaves room to spare.
+const usageQueueSize = 64
+
+// enqueueUsage queues p for writeUsage, starting it on first use; false when
+// the queue is full.
+func (r *routes) enqueueUsage(p usagePayload) bool {
+	r.usageWriterRun.Do(func() {
+		r.usageQueue = make(chan usagePayload, usageQueueSize)
+		go r.writeUsage()
+	})
+	select {
+	case r.usageQueue <- p:
+		return true
+	default:
+		return false
+	}
+}
+
+// writeUsage writes queued pushes one at a time, each bounded by
+// Server.PushMetricsUsageTimeout. A push lost to a failed write or a restart
+// comes back with the collector's next period.
+func (r *routes) writeUsage() {
+	timeout := 30 * time.Second
+	if r.config != nil && r.config.Server.PushMetricsUsageTimeout > 0 {
+		timeout = r.config.Server.PushMetricsUsageTimeout
+	}
+	for p := range r.usageQueue {
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		if err := r.dbProvider.InsertRulesUsage(ctx, p.rules); err != nil {
+			slog.Error("unable to insert rules usage", "rules", len(p.rules), "err", err)
+		}
+		if err := r.dbProvider.InsertDashboardUsage(ctx, p.dashboards); err != nil {
+			slog.Error("unable to insert dashboard usage", "dashboards", len(p.dashboards), "err", err)
+		}
+		cancel()
+		slog.Debug("wrote pushed metrics usage", "rules", len(p.rules), "dashboards", len(p.dashboards), "duration", time.Since(start))
+	}
 }
