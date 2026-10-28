@@ -525,6 +525,8 @@ inventory:
   metadata_source_workers: 4 # How many metadata_sources are read at once (default: 4)
   metadata_source_timeout: 1m # Timeout for reading one metadata source; 0 = bounded by
                              # metadata_step_timeout alone (default: 1m)
+  metadata_source_refresh_interval: 24h # How long a "source reports metric" record stands
+                             # before it is rewritten (default: 24h)
   sync_interval: 10m         # How often to sync inventory (default: 10m)
   time_window: 720h          # Time window for usage analysis (default: 30 days)
   run_timeout: 300s          # Timeout for an entire sync run (default: 300s)

@@ -20,6 +20,23 @@ type MockDBProvider struct {
 // Ensure MockDBProvider implements db.Provider
 var _ db.Provider = (*MockDBProvider)(nil)
 
+// Satisfy new Provider methods; tests don't use them
+func (m *MockDBProvider) UpsertMetricsCatalogSources(ctx context.Context, source string, names []string, refreshBefore time.Time) error {
+	return nil
+}
+
+func (m *MockDBProvider) DeleteMetricsCatalogSourcesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockDBProvider) GetMetricsCatalogSources(ctx context.Context, names []string) (map[string][]string, error) {
+	return map[string][]string{}, nil
+}
+
+func (m *MockDBProvider) ListMetricsCatalogSources(ctx context.Context) ([]string, error) {
+	return []string{}, nil
+}
+
 // Satisfy new Provider method; tests don't use it
 func (m *MockDBProvider) ListJobs(ctx context.Context) ([]string, error) {
 	return []string{}, nil

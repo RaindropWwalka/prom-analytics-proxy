@@ -130,6 +130,7 @@ func WithHandlers(uiFS fs.FS, registry *prometheus.Registry, isTracingEnabled bo
 		mux.Handle("/api/v1/serieExpressions/{name}", http.HandlerFunc(r.serieExpressions))
 		mux.Handle("/api/v1/serieUsage/{name}", http.HandlerFunc(r.GetMetricUsage))
 		mux.Handle("/api/v1/jobs", http.HandlerFunc(r.listJobs))
+		mux.Handle("/api/v1/sources", http.HandlerFunc(r.listSources))
 		mux.Handle("/api/v1/metrics/unused", http.HandlerFunc(r.metricsUnused))
 
 		// endpoint for perses metrics usage push from the client
@@ -873,6 +874,7 @@ func (r *routes) queryExecutions(w http.ResponseWriter, req *http.Request) {
 // @Param type query string false "Filter by metric type (gauge, counter, histogram, summary)"
 // @Param usage query string false "Filter by usage type (all, used, unused)"
 // @Param job query string false "Filter by job label"
+// @Param source query string false "Filter by the metadata source reporting the metric"
 // @Param unused query bool false "Filter for unused metrics only"
 // @Success 200 {object} SeriesMetadataResponse
 // @Failure 400 {object} models.ErrorResponse
@@ -944,6 +946,7 @@ func (r *routes) seriesMetadata(w http.ResponseWriter, req *http.Request) {
 	if job := req.FormValue("job"); job != "" {
 		params.Job = job
 	}
+	params.Source = req.FormValue("source")
 
 	data, err := r.dbProvider.GetSeriesMetadata(req.Context(), params)
 	if err != nil {
@@ -951,8 +954,34 @@ func (r *routes) seriesMetadata(w http.ResponseWriter, req *http.Request) {
 		writeErrorResponse(req, w, fmt.Errorf("unable to retrieve series metadata: %w", err), http.StatusInternalServerError)
 		return
 	}
+	if page, ok := data.Data.([]models.MetricMetadata); ok {
+		r.attachSources(req.Context(), page)
+	}
 
 	writeJSONResponse(req, w, data)
+}
+
+// attachSources fills in which metadata sources report each metric on a
+// page. Looked up for the page's names only, in one query, rather than
+// joined into every series-metadata query shape. A failure leaves the page
+// without sources instead of failing it: they're detail on the page, not
+// what was asked for.
+func (r *routes) attachSources(ctx context.Context, page []models.MetricMetadata) {
+	if len(page) == 0 {
+		return
+	}
+	names := make([]string, len(page))
+	for i, m := range page {
+		names[i] = m.Name
+	}
+	sources, err := r.dbProvider.GetMetricsCatalogSources(ctx, names)
+	if err != nil {
+		slog.Warn("unable to retrieve metric sources; returning series metadata without them", "err", err)
+		return
+	}
+	for i := range page {
+		page[i].Sources = sources[page[i].Name]
+	}
 }
 
 // @Summary Get metric statistics
@@ -1381,6 +1410,25 @@ func (r *routes) listJobs(w http.ResponseWriter, req *http.Request) {
 	writeJSONResponse(req, w, struct {
 		Data []string `json:"data"`
 	}{Data: jobs})
+}
+
+// @Summary List metadata sources
+// @Description Get the inventory metadata sources that report at least one metric.
+// @Tags metrics
+// @Produce json
+// @Success 200 {object} models.SourcesResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /api/v1/sources [get]
+func (r *routes) listSources(w http.ResponseWriter, req *http.Request) {
+	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+	defer cancel()
+	sources, err := r.dbProvider.ListMetricsCatalogSources(ctx)
+	if err != nil {
+		slog.Error("unable to list sources", "err", err)
+		writeErrorResponse(req, w, fmt.Errorf("unable to list sources: %w", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(req, w, models.SourcesResponse{Data: sources})
 }
 
 // @Summary Check unused metrics

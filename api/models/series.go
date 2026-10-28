@@ -22,4 +22,7 @@ type MetricMetadata struct {
 	// zero, since zero counts are also what an unevaluated metric looks
 	// like before its first RefreshMetricsUsageSummary run.
 	IsUnused bool `json:"isUnused,omitempty"`
+	// Sources are the inventory.metadata_sources that report this metric,
+	// sorted. Empty when the catalog is read from the upstream.
+	Sources []string `json:"sources,omitempty"`
 }

@@ -61,6 +61,10 @@ const sqliteSeriesMetadataCountSQL = `
                 SELECT 1 FROM metrics_job_index j
                 WHERE j.name = c.name AND j.job = ?
           ))
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = ?
+          ))
     `
 
 const sqliteSeriesMetadataBaseSQL = `
@@ -88,6 +92,10 @@ const sqliteSeriesMetadataBaseSQL = `
                 SELECT 1 FROM metrics_job_index j
                 WHERE j.name = c.name AND j.job = ?
           ))
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = ?
+          ))
     `
 
 const sqliteSeriesMetadataUnusedCountSQL = `
@@ -102,6 +110,10 @@ const sqliteSeriesMetadataUnusedCountSQL = `
                  WHEN ? = 'summary' THEN c.type IN ('summary', 'summary_count', 'summary_sum')
                  ELSE c.type = ?
                 END)
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = ?
+          ))
     `
 
 const sqliteSeriesMetadataUnusedBaseSQL = `
@@ -117,6 +129,10 @@ const sqliteSeriesMetadataUnusedBaseSQL = `
                  WHEN ? = 'summary' THEN c.type IN ('summary', 'summary_count', 'summary_sum')
                  ELSE c.type = ?
                 END)
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = ?
+          ))
     `
 
 const sqliteSeriesMetadataUnusedJobCountSQL = `
@@ -133,6 +149,10 @@ const sqliteSeriesMetadataUnusedJobCountSQL = `
                  WHEN ? = 'summary' THEN c.type IN ('summary', 'summary_count', 'summary_sum')
                  ELSE c.type = ?
                 END)
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = ?
+          ))
     `
 
 const sqliteSeriesMetadataUnusedJobBaseSQL = `
@@ -150,6 +170,10 @@ const sqliteSeriesMetadataUnusedJobBaseSQL = `
                  WHEN ? = 'summary' THEN c.type IN ('summary', 'summary_count', 'summary_sum')
                  ELSE c.type = ?
                 END)
+          AND (? = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = ?
+          ))
     `
 
 func RegisterSqliteFlags(flagSet *flag.FlagSet) {
@@ -744,6 +768,7 @@ func (p *SQLiteProvider) GetSeriesMetadata(ctx context.Context, params SeriesMet
 		params.Type, params.Type, params.Type, params.Type,
 		params.Usage, params.Usage,
 		params.Job, params.Job,
+		params.Source, params.Source,
 	).Scan(&total); err != nil {
 		return PagedResult{}, fmt.Errorf("failed to count catalog: %w", err)
 	}
@@ -757,6 +782,7 @@ func (p *SQLiteProvider) GetSeriesMetadata(ctx context.Context, params SeriesMet
 		params.Type, params.Type, params.Type, params.Type,
 		params.Usage, params.Usage,
 		params.Job, params.Job,
+		params.Source, params.Source,
 		params.PageSize, (params.Page-1)*params.PageSize,
 	)
 	if err != nil {
@@ -792,6 +818,7 @@ func (p *SQLiteProvider) getSeriesMetadataUnused(ctx context.Context, params Ser
 	if err := p.db.QueryRowContext(ctx, sqliteSeriesMetadataUnusedCountSQL,
 		params.Filter, params.Filter, params.Filter,
 		params.Type, params.Type, params.Type, params.Type,
+		params.Source, params.Source,
 	).Scan(&total); err != nil {
 		return PagedResult{}, fmt.Errorf("failed to count catalog: %w", err)
 	}
@@ -813,6 +840,7 @@ func (p *SQLiteProvider) getSeriesMetadataUnused(ctx context.Context, params Ser
 	rows, err := p.db.QueryContext(ctx, query,
 		params.Filter, params.Filter, params.Filter,
 		params.Type, params.Type, params.Type, params.Type,
+		params.Source, params.Source,
 		params.PageSize, (params.Page-1)*params.PageSize,
 	)
 	if err != nil {
@@ -840,6 +868,7 @@ func (p *SQLiteProvider) getSeriesMetadataUnusedJobScoped(ctx context.Context, p
 		params.Job,
 		params.Filter, params.Filter, params.Filter,
 		params.Type, params.Type, params.Type, params.Type,
+		params.Source, params.Source,
 	).Scan(&total); err != nil {
 		return PagedResult{}, fmt.Errorf("failed to count catalog: %w", err)
 	}
@@ -856,6 +885,7 @@ func (p *SQLiteProvider) getSeriesMetadataUnusedJobScoped(ctx context.Context, p
 		params.Job,
 		params.Filter, params.Filter, params.Filter,
 		params.Type, params.Type, params.Type, params.Type,
+		params.Source, params.Source,
 		params.PageSize, (params.Page-1)*params.PageSize,
 	)
 	if err != nil {
@@ -1013,6 +1043,85 @@ func (p *SQLiteProvider) UpsertMetricsJobIndex(ctx context.Context, items []Metr
 		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
+}
+
+func (p *SQLiteProvider) UpsertMetricsCatalogSources(ctx context.Context, source string, names []string, refreshBefore time.Time) error {
+	names = sortedUniqueNames(names)
+	if len(names) == 0 {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	// Per-item, as in UpsertMetricsCatalog: SQLite is in-process, so
+	// there's no round trip to amortise.
+	stmt, err := tx.PrepareContext(ctx, `
+        INSERT INTO metrics_catalog_sources(name, source, last_seen_at)
+        SELECT ?1, ?2, datetime('now')
+        WHERE NOT EXISTS (
+            SELECT 1 FROM metrics_catalog_sources
+            WHERE name = ?1 AND source = ?2 AND last_seen_at >= ?3
+        )
+        ON CONFLICT(name, source) DO UPDATE SET
+            last_seen_at = excluded.last_seen_at
+    `)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("prepare: %w", err)
+	}
+	defer CloseResource(stmt)
+	refresh := refreshBefore.UTC().Format(SQLiteTimeFormat)
+	for _, name := range names {
+		if _, err := stmt.ExecContext(ctx, name, source, refresh); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("exec: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+func (p *SQLiteProvider) DeleteMetricsCatalogSourcesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	res, err := p.db.ExecContext(ctx, `DELETE FROM metrics_catalog_sources WHERE last_seen_at < ?`, cutoff.UTC().Format(SQLiteTimeFormat))
+	if err != nil {
+		return 0, ErrorWithOperation(err, "delete stale catalog sources")
+	}
+	return res.RowsAffected()
+}
+
+func (p *SQLiteProvider) GetMetricsCatalogSources(ctx context.Context, names []string) (map[string][]string, error) {
+	if len(names) == 0 {
+		return map[string][]string{}, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
+	args := make([]any, len(names))
+	for i, n := range names {
+		args[i] = n
+	}
+	rows, err := ExecuteQuery(ctx, p.db, `
+        SELECT name, source FROM metrics_catalog_sources
+        WHERE name IN (`+placeholders+`)
+        ORDER BY name, source
+    `, args...)
+	if err != nil {
+		return nil, err
+	}
+	return groupCatalogSources(rows)
+}
+
+func (p *SQLiteProvider) ListMetricsCatalogSources(ctx context.Context) ([]string, error) {
+	rows, err := ExecuteQuery(ctx, p.db, `SELECT DISTINCT source FROM metrics_catalog_sources ORDER BY source`)
+	if err != nil {
+		return nil, err
+	}
+	return ScanRows(rows, scanJob)
 }
 
 // ListJobs returns the distinct list of jobs from metrics_job_index

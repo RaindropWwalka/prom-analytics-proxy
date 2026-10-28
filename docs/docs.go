@@ -1252,6 +1252,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Filter by the metadata source reporting the metric",
+                        "name": "source",
+                        "in": "query"
+                    },
+                    {
                         "type": "boolean",
                         "description": "Filter for unused metrics only",
                         "name": "unused",
@@ -1269,6 +1275,32 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/sources": {
+            "get": {
+                "description": "Get the inventory metadata sources that report at least one metric.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "metrics"
+                ],
+                "summary": "List metadata sources",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.SourcesResponse"
                         }
                     },
                     "500": {
@@ -1663,6 +1695,13 @@ const docTemplate = `{
                 "recordCount": {
                     "type": "integer"
                 },
+                "sources": {
+                    "description": "Sources are the inventory.metadata_sources that report this metric,\nsorted. Empty when the catalog is read from the upstream.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "type": {
                     "type": "string"
                 },
@@ -1690,6 +1729,17 @@ const docTemplate = `{
                 },
                 "totalQueryableSamples": {
                     "type": "integer"
+                }
+            }
+        },
+        "models.SourcesResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

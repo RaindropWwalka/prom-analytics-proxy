@@ -36,6 +36,18 @@ type Provider interface {
 	RefreshMetricsUsageSummary(ctx context.Context, tr TimeRange) error
 	UpsertMetricsJobIndex(ctx context.Context, items []MetricJobIndexItem) error
 	ListJobs(ctx context.Context) ([]string, error)
+	// UpsertMetricsCatalogSources records that source reported names. A
+	// (name, source) pair is inserted when new and its last_seen_at
+	// refreshed only once older than refreshBefore, so a pair confirmed
+	// recently costs no write.
+	UpsertMetricsCatalogSources(ctx context.Context, source string, names []string, refreshBefore time.Time) error
+	// DeleteMetricsCatalogSourcesBefore drops pairs last confirmed before
+	// cutoff: the source has stopped reporting the metric.
+	DeleteMetricsCatalogSourcesBefore(ctx context.Context, cutoff time.Time) (int64, error)
+	// GetMetricsCatalogSources returns, for each of names, the sources
+	// that report it, sorted. Names no source reports are absent.
+	GetMetricsCatalogSources(ctx context.Context, names []string) (map[string][]string, error)
+	ListMetricsCatalogSources(ctx context.Context) ([]string, error)
 
 	GetQueryTypes(ctx context.Context, tr TimeRange, fingerprint string) (*QueryTypesResult, error)
 	GetAverageDuration(ctx context.Context, tr TimeRange, fingerprint string) (*AverageDurationResult, error)
@@ -268,6 +280,8 @@ type SeriesMetadataParams struct {
 	Type      string
 	Usage     string
 	Job       string
+	// Source keeps the metrics a metadata source reports (metrics_catalog_sources).
+	Source string
 }
 
 func NormalizeSeriesMetadataUsage(usage string) string {

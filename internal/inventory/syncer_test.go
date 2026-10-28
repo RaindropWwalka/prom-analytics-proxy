@@ -499,6 +499,7 @@ func TestNewSyncer_RegistersItsMetricsUnderTheirPublishedNames(t *testing.T) {
 		"inventory_sync_failure_total",
 		"inventory_catalog_summary_mismatch_total",
 		"inventory_job_index_failure_total",
+		"inventory_catalog_sources_failure_total",
 	}, names)
 }
 

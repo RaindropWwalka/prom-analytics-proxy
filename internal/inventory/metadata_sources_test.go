@@ -22,19 +22,21 @@ import (
 
 func newSourcesSyncer(provider *fakeProvider, nameOnly bool, sources ...metadataSource) *Syncer {
 	return &Syncer{
-		dbProvider:              provider,
-		metadataSources:         sources,
-		timeWindow:              time.Hour,
-		metadataSyncEnabled:     true,
-		metadataMetricsNameOnly: nameOnly,
-		runTimeout:              time.Minute,
-		metadataStepTimeout:     30 * time.Second,
-		summaryStepTimeout:      30 * time.Second,
-		syncDuration:            newHistogram(),
-		syncSuccess:             newCounter(),
-		syncFailure:             newCounter(),
-		catalogSummaryMismatch:  newCounter(),
-		metadataSourceFailure:   prometheus.NewCounterVec(prometheus.CounterOpts{Name: "test_source_failure"}, []string{"source"}),
+		dbProvider:                    provider,
+		metadataSources:               sources,
+		timeWindow:                    time.Hour,
+		metadataSyncEnabled:           true,
+		metadataMetricsNameOnly:       nameOnly,
+		runTimeout:                    time.Minute,
+		metadataStepTimeout:           30 * time.Second,
+		summaryStepTimeout:            30 * time.Second,
+		syncDuration:                  newHistogram(),
+		syncSuccess:                   newCounter(),
+		syncFailure:                   newCounter(),
+		catalogSummaryMismatch:        newCounter(),
+		metadataSourceFailure:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "test_source_failure"}, []string{"source"}),
+		catalogSourcesFailure:         newCounter(),
+		metadataSourceRefreshInterval: 24 * time.Hour,
 	}
 }
 
@@ -57,7 +59,7 @@ func TestSyncer_MetadataSourcesAreMergedIntoOneCatalog(t *testing.T) {
 		"up":             {{Type: "gauge", Help: "from b"}},
 		"described_in_b": {{Type: "counter", Help: "b"}},
 	}}
-	s := newSourcesSyncer(provider, false, metadataSource{"a", a}, metadataSource{"b", b})
+	s := newSourcesSyncer(provider, false, metadataSource{name: "a", api: a}, metadataSource{name: "b", api: b})
 
 	s.RunOnce(context.Background())
 
@@ -73,7 +75,7 @@ func TestSyncer_MetadataSourceFailureCostsOnlyItsOwnMetrics(t *testing.T) {
 	provider := &fakeProvider{}
 	ok := &fakePromAPI{jobs: []string{"up", "node_load1"}}
 	broken := &fakePromAPI{labelErr: errors.New("connection refused")}
-	s := newSourcesSyncer(provider, true, metadataSource{"broken", broken}, metadataSource{"ok", ok})
+	s := newSourcesSyncer(provider, true, metadataSource{name: "broken", api: broken}, metadataSource{name: "ok", api: ok})
 
 	s.RunOnce(context.Background())
 
@@ -88,7 +90,7 @@ func TestSyncer_EveryMetadataSourceFailingFailsTheStep(t *testing.T) {
 	provider := &fakeProvider{}
 	a := &fakePromAPI{metadataErr: errors.New("a down")}
 	b := &fakePromAPI{metadataErr: errors.New("b down")}
-	s := newSourcesSyncer(provider, false, metadataSource{"a", a}, metadataSource{"b", b})
+	s := newSourcesSyncer(provider, false, metadataSource{name: "a", api: a}, metadataSource{name: "b", api: b})
 
 	s.RunOnce(context.Background())
 
@@ -117,9 +119,10 @@ func TestNewSyncer_ReadsMetadataSourcesWithTheirOwnAuth(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, s.metadataSources, 1)
 
-	items, err := s.fetchCatalog(context.Background(), s.fetchMetadataItems)
+	reported, err := s.fetchCatalog(context.Background(), s.fetchMetadataItems)
 	require.NoError(t, err)
-	assert.Equal(t, []db.MetricCatalogItem{{Name: "up", Type: "gauge", Help: "up"}}, items)
+	require.Len(t, reported, 1)
+	assert.Equal(t, []db.MetricCatalogItem{{Name: "up", Type: "gauge", Help: "up"}}, reported[0].items)
 	assert.Equal(t, "reader", gotUser)
 	assert.Equal(t, "s3cret", gotPass)
 }
@@ -130,11 +133,6 @@ func TestNewSyncer_RejectsAMetadataSourceWithoutURL(t *testing.T) {
 
 	_, err := NewSyncer(&fakeProvider{}, "http://localhost:9090", &cfg, prometheus.NewRegistry())
 	assert.ErrorContains(t, err, "inventory.metadata_sources[0]: url is required")
-}
-
-func TestRedactURL_HidesPasswords(t *testing.T) {
-	assert.Equal(t, "https://user:xxxxx@prom.example.com", redactURL("https://user:pass@prom.example.com"))
-	assert.Equal(t, "http://prom:9090", redactURL("http://prom:9090"))
 }
 
 func keys(m map[string]db.MetricCatalogItem) []string {
@@ -204,7 +202,7 @@ func TestSyncer_MetadataSourceTimeoutFreesAHungSource(t *testing.T) {
 		ok := &fakePromAPI{meta: map[string][]v1.Metadata{"up": {{Type: "gauge"}}}}
 		// One worker: without the per-source timeout the hung source would
 		// hold it until the step's own timeout, and "ok" would never be read.
-		s := newSourcesSyncer(provider, false, metadataSource{"hung", hung}, metadataSource{"ok", ok})
+		s := newSourcesSyncer(provider, false, metadataSource{name: "hung", api: hung}, metadataSource{name: "ok", api: ok})
 		s.metadataSourceWorkers = 1
 		s.metadataSourceTimeout = 5 * time.Second
 
@@ -223,9 +221,61 @@ func TestSyncer_SourceTimeoutIsNamedInTheError(t *testing.T) {
 		s := newSourcesSyncer(&fakeProvider{}, false)
 		s.metadataSourceTimeout = 5 * time.Second
 
-		_, err := s.fetchSource(context.Background(), metadataSource{"hung", &fakePromAPI{metadataDelay: time.Hour}}, s.fetchMetadataItems)
+		_, err := s.fetchSource(context.Background(), metadataSource{name: "hung", api: &fakePromAPI{metadataDelay: time.Hour}}, s.fetchMetadataItems)
 
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		assert.ErrorContains(t, err, "timed out after 5s (metadata_source_timeout)")
 	})
+}
+
+func TestSyncer_RecordsWhichSourceReportsEachMetric(t *testing.T) {
+	provider := &fakeProvider{}
+	first := &fakePromAPI{meta: map[string][]v1.Metadata{
+		"up":       {{Type: "gauge"}},
+		"req_time": {{Type: "histogram"}},
+	}}
+	second := &fakePromAPI{meta: map[string][]v1.Metadata{"up": {{Type: "gauge"}}}}
+	down := &fakePromAPI{metadataErr: errors.New("down")}
+	s := newSourcesSyncer(provider, false,
+		metadataSource{name: "source-b", api: first}, metadataSource{name: "source-a", api: second}, metadataSource{name: "down", api: down})
+
+	s.RunOnce(context.Background())
+
+	require.Equal(t, 1, provider.catalogCommits)
+	assert.ElementsMatch(t, []string{"up", "req_time_bucket", "req_time_count", "req_time_sum"}, provider.sources["source-b"],
+		"a source is recorded against every catalog row it produced, histogram series included")
+	assert.Equal(t, []string{"up"}, provider.sources["source-a"])
+	assert.NotContains(t, provider.sources, "down", "a source that failed this cycle reported nothing")
+	assert.Equal(t, 1, provider.sourcesDeletes, "stale pairs are cleaned up every cycle")
+}
+
+func TestSyncer_RecordsNoSourcesWhenReadingTheUpstream(t *testing.T) {
+	provider := &fakeProvider{}
+	s := newSourcesSyncer(provider, false)
+	s.promAPI = &fakePromAPI{meta: map[string][]v1.Metadata{"up": {{Type: "gauge"}}}}
+
+	s.RunOnce(context.Background())
+
+	require.Equal(t, 1, provider.catalogCommits)
+	assert.Empty(t, provider.sources)
+	assert.Zero(t, provider.sourcesDeletes)
+}
+
+func TestSyncer_NamesOnlySourceFillsTheCatalogDescribedSourcesDescribe(t *testing.T) {
+	provider := &fakeProvider{}
+	nameOnly := true
+	// A Thanos-like source: no metadata, but every metric's name.
+	names := &fakePromAPI{jobs: []string{"up", "only_in_names"}}
+	described := &fakePromAPI{meta: map[string][]v1.Metadata{"up": {{Type: "gauge", Help: "up"}}}}
+	s := newSourcesSyncer(provider, false,
+		metadataSource{name: "names", api: names, nameOnly: &nameOnly},
+		metadataSource{name: "described", api: described})
+
+	s.RunOnce(context.Background())
+
+	require.Equal(t, 1, provider.catalogCommits)
+	got := catalogByName(provider.catalogItems)
+	assert.Len(t, got, 2)
+	assert.Equal(t, "gauge", got["up"].Type, "a described entry wins over a name-only one, whatever the order")
+	assert.Equal(t, db.MetricCatalogItem{Name: "only_in_names"}, got["only_in_names"])
 }

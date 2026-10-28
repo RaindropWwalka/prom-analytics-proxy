@@ -68,6 +68,10 @@ const pgSeriesMetadataCountSQL = `
                 SELECT 1 FROM metrics_job_index j
                 WHERE j.name = c.name AND j.job = $4
           ))
+          AND ($5 = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = $5
+          ))
     `
 
 const pgSeriesMetadataBaseSQL = `
@@ -95,6 +99,10 @@ const pgSeriesMetadataBaseSQL = `
                 SELECT 1 FROM metrics_job_index j
                 WHERE j.name = c.name AND j.job = $4
           ))
+          AND ($5 = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = $5
+          ))
     `
 
 const pgSeriesMetadataUnusedCountSQL = `
@@ -109,6 +117,10 @@ const pgSeriesMetadataUnusedCountSQL = `
                   WHEN $2 = 'summary' THEN c.type IN ('summary', 'summary_count', 'summary_sum')
                   ELSE c.type = $2
                 END)
+          AND ($3 = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = $3
+          ))
     `
 
 const pgSeriesMetadataUnusedBaseSQL = `
@@ -124,6 +136,10 @@ const pgSeriesMetadataUnusedBaseSQL = `
                   WHEN $2 = 'summary' THEN c.type IN ('summary', 'summary_count', 'summary_sum')
                   ELSE c.type = $2
                 END)
+          AND ($3 = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = $3
+          ))
     `
 
 const pgSeriesMetadataUnusedJobCountSQL = `
@@ -140,6 +156,10 @@ const pgSeriesMetadataUnusedJobCountSQL = `
                   WHEN $2 = 'summary' THEN c.type IN ('summary', 'summary_count', 'summary_sum')
                   ELSE c.type = $2
                 END)
+          AND ($4 = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = $4
+          ))
     `
 
 const pgSeriesMetadataUnusedJobBaseSQL = `
@@ -157,6 +177,10 @@ const pgSeriesMetadataUnusedJobBaseSQL = `
                   WHEN $2 = 'summary' THEN c.type IN ('summary', 'summary_count', 'summary_sum')
                   ELSE c.type = $2
                 END)
+          AND ($4 = '' OR EXISTS (
+                SELECT 1 FROM metrics_catalog_sources src
+                WHERE src.name = c.name AND src.source = $4
+          ))
     `
 
 // Non-breaking alias for future rename migration
@@ -893,15 +917,15 @@ func (p *PostGreSQLProvider) GetSeriesMetadata(ctx context.Context, params Serie
 
 	// Used / all: catalog-driven LEFT JOIN shape.
 	var total int
-	if err := p.db.QueryRowContext(ctx, pgSeriesMetadataCountSQL, params.Filter, params.Type, params.Usage, params.Job).Scan(&total); err != nil {
+	if err := p.db.QueryRowContext(ctx, pgSeriesMetadataCountSQL, params.Filter, params.Type, params.Usage, params.Job, params.Source).Scan(&total); err != nil {
 		return PagedResult{}, fmt.Errorf("count: %w", err)
 	}
 	if total == 0 {
 		return PagedResult{Total: 0, TotalPages: 0, Data: []models.MetricMetadata{}}, nil
 	}
 
-	query := BuildSafeQueryWithOrderBy(pgSeriesMetadataBaseSQL, "c", " LIMIT $5 OFFSET $6", params.SortBy, params.SortOrder, ValidSeriesMetadataSortFields, "queryCount", SeriesMetadataSortAliases)
-	rows, err := p.db.QueryContext(ctx, query, params.Filter, params.Type, params.Usage, params.Job, params.PageSize, (params.Page-1)*params.PageSize)
+	query := BuildSafeQueryWithOrderBy(pgSeriesMetadataBaseSQL, "c", " LIMIT $6 OFFSET $7", params.SortBy, params.SortOrder, ValidSeriesMetadataSortFields, "queryCount", SeriesMetadataSortAliases)
+	rows, err := p.db.QueryContext(ctx, query, params.Filter, params.Type, params.Usage, params.Job, params.Source, params.PageSize, (params.Page-1)*params.PageSize)
 	if err != nil {
 		return PagedResult{}, fmt.Errorf("select: %w", err)
 	}
@@ -932,7 +956,7 @@ func (p *PostGreSQLProvider) getSeriesMetadataUnused(ctx context.Context, params
 	}
 
 	var total int
-	if err := p.db.QueryRowContext(ctx, pgSeriesMetadataUnusedCountSQL, params.Filter, params.Type).Scan(&total); err != nil {
+	if err := p.db.QueryRowContext(ctx, pgSeriesMetadataUnusedCountSQL, params.Filter, params.Type, params.Source).Scan(&total); err != nil {
 		return PagedResult{}, fmt.Errorf("count: %w", err)
 	}
 	if total == 0 {
@@ -949,8 +973,8 @@ func (p *PostGreSQLProvider) getSeriesMetadataUnused(ctx context.Context, params
 	// idx_metrics_usage_summary_is_unused partial index's name ordering,
 	// so the planner can index-scan + LIMIT in O(LIMIT) work. sortOrder is
 	// still honoured so ?sortOrder=desc inverts the alphabetical listing.
-	query := BuildSafeQueryWithOrderBy(pgSeriesMetadataUnusedBaseSQL, "c", " LIMIT $3 OFFSET $4", "name", params.SortOrder, ValidSeriesMetadataSortFields, "name", SeriesMetadataSortAliases)
-	rows, err := p.db.QueryContext(ctx, query, params.Filter, params.Type, params.PageSize, (params.Page-1)*params.PageSize)
+	query := BuildSafeQueryWithOrderBy(pgSeriesMetadataUnusedBaseSQL, "c", " LIMIT $4 OFFSET $5", "name", params.SortOrder, ValidSeriesMetadataSortFields, "name", SeriesMetadataSortAliases)
+	rows, err := p.db.QueryContext(ctx, query, params.Filter, params.Type, params.Source, params.PageSize, (params.Page-1)*params.PageSize)
 	if err != nil {
 		return PagedResult{}, fmt.Errorf("select: %w", err)
 	}
@@ -972,7 +996,7 @@ func (p *PostGreSQLProvider) getSeriesMetadataUnused(ctx context.Context, params
 // looking for a sparse 57-row match.
 func (p *PostGreSQLProvider) getSeriesMetadataUnusedJobScoped(ctx context.Context, params SeriesMetadataParams) (PagedResult, error) {
 	var total int
-	if err := p.db.QueryRowContext(ctx, pgSeriesMetadataUnusedJobCountSQL, params.Filter, params.Type, params.Job).Scan(&total); err != nil {
+	if err := p.db.QueryRowContext(ctx, pgSeriesMetadataUnusedJobCountSQL, params.Filter, params.Type, params.Job, params.Source).Scan(&total); err != nil {
 		return PagedResult{}, fmt.Errorf("count: %w", err)
 	}
 	if total == 0 {
@@ -983,8 +1007,8 @@ func (p *PostGreSQLProvider) getSeriesMetadataUnusedJobScoped(ctx context.Contex
 	// The same all-zero-counts pattern applies here, and consistency
 	// matters because clients page through both shapes against the same
 	// API contract.
-	query := BuildSafeQueryWithOrderBy(pgSeriesMetadataUnusedJobBaseSQL, "c", " LIMIT $4 OFFSET $5", "name", params.SortOrder, ValidSeriesMetadataSortFields, "name", SeriesMetadataSortAliases)
-	rows, err := p.db.QueryContext(ctx, query, params.Filter, params.Type, params.Job, params.PageSize, (params.Page-1)*params.PageSize)
+	query := BuildSafeQueryWithOrderBy(pgSeriesMetadataUnusedJobBaseSQL, "c", " LIMIT $5 OFFSET $6", "name", params.SortOrder, ValidSeriesMetadataSortFields, "name", SeriesMetadataSortAliases)
+	rows, err := p.db.QueryContext(ctx, query, params.Filter, params.Type, params.Job, params.Source, params.PageSize, (params.Page-1)*params.PageSize)
 	if err != nil {
 		return PagedResult{}, fmt.Errorf("select: %w", err)
 	}
@@ -1259,6 +1283,63 @@ func (p *PostGreSQLProvider) UpsertMetricsJobIndex(ctx context.Context, items []
 		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
+}
+
+func (p *PostGreSQLProvider) UpsertMetricsCatalogSources(ctx context.Context, source string, names []string, refreshBefore time.Time) error {
+	names = sortedUniqueNames(names)
+	if len(names) == 0 {
+		return nil
+	}
+	// One statement, like UpsertMetricsCatalog. A pair confirmed since
+	// refreshBefore is filtered out before the INSERT rather than skipped by
+	// a conditional DO UPDATE: the latter still locks the row, which is a
+	// write of its own. Sorted and de-duplicated names keep the statement
+	// clear of "cannot affect row a second time" and of lock-order deadlocks.
+	if _, err := p.db.ExecContext(ctx, `
+        INSERT INTO metrics_catalog_sources(name, source, last_seen_at)
+        SELECT n, $2, NOW() AT TIME ZONE 'UTC'
+        FROM unnest($1::text[]) AS n
+        WHERE NOT EXISTS (
+            SELECT 1 FROM metrics_catalog_sources s
+            WHERE s.name = n AND s.source = $2 AND s.last_seen_at >= $3
+        )
+        ON CONFLICT(name, source) DO UPDATE SET
+          last_seen_at = EXCLUDED.last_seen_at
+    `, pq.Array(names), source, refreshBefore.UTC().Format(ISOTimeFormat)); err != nil {
+		return fmt.Errorf("upsert catalog sources: %w", err)
+	}
+	return nil
+}
+
+func (p *PostGreSQLProvider) DeleteMetricsCatalogSourcesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := p.db.ExecContext(ctx, `DELETE FROM metrics_catalog_sources WHERE last_seen_at < $1`, cutoff.UTC().Format(ISOTimeFormat))
+	if err != nil {
+		return 0, ErrorWithOperation(err, "delete stale catalog sources")
+	}
+	return res.RowsAffected()
+}
+
+func (p *PostGreSQLProvider) GetMetricsCatalogSources(ctx context.Context, names []string) (map[string][]string, error) {
+	if len(names) == 0 {
+		return map[string][]string{}, nil
+	}
+	rows, err := ExecuteQuery(ctx, p.db, `
+        SELECT name, source FROM metrics_catalog_sources
+        WHERE name = ANY($1::text[])
+        ORDER BY name, source
+    `, pq.Array(names))
+	if err != nil {
+		return nil, err
+	}
+	return groupCatalogSources(rows)
+}
+
+func (p *PostGreSQLProvider) ListMetricsCatalogSources(ctx context.Context) ([]string, error) {
+	rows, err := ExecuteQuery(ctx, p.db, `SELECT DISTINCT source FROM metrics_catalog_sources ORDER BY source`)
+	if err != nil {
+		return nil, err
+	}
+	return ScanRows(rows, scanJob)
 }
 
 // ListJobs returns the distinct list of jobs known in metrics_job_index

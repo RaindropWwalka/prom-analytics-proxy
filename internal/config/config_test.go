@@ -404,3 +404,49 @@ func TestInventoryConfig_ValidateChecksMetadataSourceWorkersAndTimeout(t *testin
 	cfg.MetadataSources = nil
 	assert.NoError(t, cfg.Validate())
 }
+
+func TestMetadataSourceConfig_DisplayName(t *testing.T) {
+	assert.Equal(t, "source-c", MetadataSourceConfig{Name: "source-c", URL: "http://prom:9090"}.DisplayName())
+	assert.Equal(t, "http://prom:9090", MetadataSourceConfig{URL: "http://prom:9090"}.DisplayName())
+	assert.Equal(t, "https://user:xxxxx@prom.example.com", MetadataSourceConfig{URL: "https://user:pass@prom.example.com"}.DisplayName(),
+		"a password in the URL must not end up stored or shown")
+}
+
+func TestInventoryConfig_ValidateRejectsDuplicateSourceNames(t *testing.T) {
+	cfg := DefaultConfig.Inventory
+	cfg.MetadataSources = []MetadataSourceConfig{
+		{Name: "source-b", URL: "http://a:9090"},
+		{Name: "source-b", URL: "http://b:9090"},
+		{URL: "http://c:9090"},
+		{URL: "http://c:9090"},
+	}
+	err := cfg.Validate()
+	assert.ErrorContains(t, err, `inventory.metadata_sources[1]: name "source-b" is already used by metadata_sources[0]`)
+	assert.ErrorContains(t, err, `inventory.metadata_sources[3]: name "http://c:9090" is already used by metadata_sources[2]`)
+}
+
+func TestInventoryConfig_ValidateChecksMetadataSourceRefreshInterval(t *testing.T) {
+	cfg := DefaultConfig.Inventory
+	cfg.MetadataSources = []MetadataSourceConfig{{URL: "http://prometheus:9090"}}
+
+	cfg.MetadataSourceRefreshInterval = cfg.TimeWindow
+	assert.ErrorContains(t, cfg.Validate(), "inventory.metadata_source_refresh_interval must be positive and shorter than time_window")
+
+	cfg.MetadataSourceRefreshInterval = 0
+	assert.ErrorContains(t, cfg.Validate(), "inventory.metadata_source_refresh_interval")
+}
+
+func TestMetadataSourceConfig_ParsesMetricsNameOnly(t *testing.T) {
+	var cfg Config
+	require.NoError(t, yaml.Unmarshal([]byte(`
+inventory:
+  metadata_sources:
+  - url: http://thanos-query:9090
+    metrics_name_only: true
+  - url: http://prometheus:9090
+`), &cfg))
+	srcs := cfg.Inventory.MetadataSources
+	require.NotNil(t, srcs[0].MetricsNameOnly)
+	assert.True(t, *srcs[0].MetricsNameOnly)
+	assert.Nil(t, srcs[1].MetricsNameOnly, "unset follows inventory.metadata_metrics_name_only")
+}

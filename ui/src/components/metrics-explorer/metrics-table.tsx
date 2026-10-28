@@ -4,6 +4,7 @@ import * as React from "react";
 import { SortingState } from "@tanstack/react-table";
 import { type LegacyColumnDef } from "@tanstack/react-table/legacy";
 import { MetricTypeTag } from "@/components/metrics-explorer/metric-type-tag";
+import { MetricSources } from "@/components/metrics-explorer/metric-sources";
 import { useLocation } from "wouter";
 import { MetricMetadata, PagedResult, TableState } from "@/lib/types";
 import { fromUTC } from "@/lib/utils/date-utils";
@@ -127,6 +128,13 @@ export function MetricsTable({
           {row.getValue("help")}
         </div>
       ),
+    },
+    {
+      accessorKey: "sources",
+      size: 160,
+      header: "Sources",
+      enableSorting: false,
+      cell: ({ row }) => <MetricSources sources={row.original.sources} />,
     },
     {
       accessorKey: "alertCount",

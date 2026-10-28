@@ -255,6 +255,13 @@ definitions:
         type: integer
       recordCount:
         type: integer
+      sources:
+        description: |-
+          Sources are the inventory.metadata_sources that report this metric,
+          sorted. Empty when the catalog is read from the upstream.
+        items:
+          type: string
+        type: array
       type:
         type: string
       unit:
@@ -273,6 +280,13 @@ definitions:
         type: integer
       totalQueryableSamples:
         type: integer
+    type: object
+  models.SourcesResponse:
+    properties:
+      data:
+        items:
+          type: string
+        type: array
     type: object
   models.Stats:
     properties:
@@ -1255,6 +1269,10 @@ paths:
         in: query
         name: job
         type: string
+      - description: Filter by the metadata source reporting the metric
+        in: query
+        name: source
+        type: string
       - description: Filter for unused metrics only
         in: query
         name: unused
@@ -1275,6 +1293,24 @@ paths:
           schema:
             $ref: '#/definitions/models.ErrorResponse'
       summary: Series metadata
+      tags:
+      - metrics
+  /api/v1/sources:
+    get:
+      description: Get the inventory metadata sources that report at least one
+        metric.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SourcesResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: List metadata sources
       tags:
       - metrics
 swagger: "2.0"

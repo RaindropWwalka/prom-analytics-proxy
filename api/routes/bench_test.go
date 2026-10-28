@@ -55,6 +55,18 @@ func (p *benchDBProvider) UpsertMetricsJobIndex(_ context.Context, _ []db.Metric
 	return nil
 }
 func (p *benchDBProvider) ListJobs(_ context.Context) ([]string, error) { return nil, nil }
+func (p *benchDBProvider) UpsertMetricsCatalogSources(_ context.Context, _ string, _ []string, _ time.Time) error {
+	return nil
+}
+func (p *benchDBProvider) DeleteMetricsCatalogSourcesBefore(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+func (p *benchDBProvider) GetMetricsCatalogSources(_ context.Context, _ []string) (map[string][]string, error) {
+	return nil, nil
+}
+func (p *benchDBProvider) ListMetricsCatalogSources(_ context.Context) ([]string, error) {
+	return nil, nil
+}
 func (p *benchDBProvider) GetQueryTypes(_ context.Context, _ db.TimeRange, _ string) (*db.QueryTypesResult, error) {
 	return nil, nil
 }

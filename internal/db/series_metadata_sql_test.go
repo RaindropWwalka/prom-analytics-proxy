@@ -34,6 +34,7 @@ func TestSeriesMetadataSQLConsts_Shape(t *testing.T) {
 			name: "pgSeriesMetadataCountSQL",
 			sql:  pgSeriesMetadataCountSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"SELECT COUNT(*)",
 				"FROM metrics_catalog c",
 				"LEFT JOIN metrics_usage_summary s",
@@ -42,49 +43,53 @@ func TestSeriesMetadataSQLConsts_Shape(t *testing.T) {
 				"metrics_job_index j",
 				"j.job = $4",
 			},
-			pgPlaceholderCount: 4,
+			pgPlaceholderCount: 5,
 		},
 		{
 			name: "pgSeriesMetadataBaseSQL",
 			sql:  pgSeriesMetadataBaseSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"SELECT c.name, c.type, c.help, c.unit",
 				"FROM metrics_catalog c",
 				"LEFT JOIN metrics_usage_summary s",
 				"$1", "$2", "$3", "$4",
 				"j.job = $4",
 			},
-			pgPlaceholderCount: 4,
+			pgPlaceholderCount: 5,
 		},
 		// PostgreSQL: unused
 		{
 			name: "pgSeriesMetadataUnusedCountSQL",
 			sql:  pgSeriesMetadataUnusedCountSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"SELECT COUNT(*)",
 				"FROM metrics_usage_summary s",
 				"JOIN metrics_catalog c",
 				"s.is_unused = TRUE",
 				"$1", "$2",
 			},
-			pgPlaceholderCount: 2,
+			pgPlaceholderCount: 3,
 		},
 		{
 			name: "pgSeriesMetadataUnusedBaseSQL",
 			sql:  pgSeriesMetadataUnusedBaseSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"FROM metrics_usage_summary s",
 				"JOIN metrics_catalog c",
 				"s.is_unused = TRUE",
 				"$1", "$2",
 			},
-			pgPlaceholderCount: 2,
+			pgPlaceholderCount: 3,
 		},
 		// PostgreSQL: unused + job
 		{
 			name: "pgSeriesMetadataUnusedJobCountSQL",
 			sql:  pgSeriesMetadataUnusedJobCountSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"FROM metrics_job_index j",
 				"JOIN metrics_usage_summary s",
 				"JOIN metrics_catalog c",
@@ -92,12 +97,13 @@ func TestSeriesMetadataSQLConsts_Shape(t *testing.T) {
 				"s.is_unused = TRUE",
 				"$1", "$2", "$3",
 			},
-			pgPlaceholderCount: 3,
+			pgPlaceholderCount: 4,
 		},
 		{
 			name: "pgSeriesMetadataUnusedJobBaseSQL",
 			sql:  pgSeriesMetadataUnusedJobBaseSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"FROM metrics_job_index j",
 				"JOIN metrics_usage_summary s",
 				"JOIN metrics_catalog c",
@@ -105,13 +111,14 @@ func TestSeriesMetadataSQLConsts_Shape(t *testing.T) {
 				"s.is_unused = TRUE",
 				"$1", "$2", "$3",
 			},
-			pgPlaceholderCount: 3,
+			pgPlaceholderCount: 4,
 		},
 		// SQLite: used / all
 		{
 			name: "sqliteSeriesMetadataCountSQL",
 			sql:  sqliteSeriesMetadataCountSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"SELECT COUNT(*)",
 				"FROM metrics_catalog c",
 				"LEFT JOIN metrics_usage_summary s",
@@ -119,64 +126,69 @@ func TestSeriesMetadataSQLConsts_Shape(t *testing.T) {
 				"metrics_job_index j",
 				"j.job = ?",
 			},
-			sqlitePlaceholderCount: 11,
+			sqlitePlaceholderCount: 13,
 		},
 		{
 			name: "sqliteSeriesMetadataBaseSQL",
 			sql:  sqliteSeriesMetadataBaseSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"SELECT c.name, c.type, c.help, c.unit",
 				"FROM metrics_catalog AS c",
 				"LEFT JOIN metrics_usage_summary AS s",
 				"j.job = ?",
 			},
-			sqlitePlaceholderCount: 11,
+			sqlitePlaceholderCount: 13,
 		},
 		// SQLite: unused
 		{
 			name: "sqliteSeriesMetadataUnusedCountSQL",
 			sql:  sqliteSeriesMetadataUnusedCountSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"FROM metrics_usage_summary s",
 				"JOIN metrics_catalog c",
 				"s.is_unused = TRUE",
 			},
-			sqlitePlaceholderCount: 7,
+			sqlitePlaceholderCount: 9,
 		},
 		{
 			name: "sqliteSeriesMetadataUnusedBaseSQL",
 			sql:  sqliteSeriesMetadataUnusedBaseSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"FROM metrics_usage_summary AS s",
 				"JOIN metrics_catalog AS c",
 				"s.is_unused = TRUE",
 			},
-			sqlitePlaceholderCount: 7,
+			sqlitePlaceholderCount: 9,
 		},
 		// SQLite: unused + job
 		{
 			name: "sqliteSeriesMetadataUnusedJobCountSQL",
 			sql:  sqliteSeriesMetadataUnusedJobCountSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"FROM metrics_job_index j",
 				"JOIN metrics_usage_summary s",
 				"JOIN metrics_catalog c",
 				"j.job = ?",
 				"s.is_unused = TRUE",
 			},
-			sqlitePlaceholderCount: 8,
+			sqlitePlaceholderCount: 10,
 		},
 		{
 			name: "sqliteSeriesMetadataUnusedJobBaseSQL",
 			sql:  sqliteSeriesMetadataUnusedJobBaseSQL,
 			wantSubs: []string{
+				"metrics_catalog_sources src",
 				"FROM metrics_job_index AS j",
 				"JOIN metrics_usage_summary AS s",
 				"JOIN metrics_catalog AS c",
 				"j.job = ?",
 				"s.is_unused = TRUE",
 			},
-			sqlitePlaceholderCount: 8,
+			sqlitePlaceholderCount: 10,
 		},
 	}
 
@@ -312,19 +324,19 @@ func TestSeriesMetadataSQLConsts_PreparesPostgreSQL(t *testing.T) {
 		{
 			name: "pgSeriesMetadataBaseSQL",
 			built: BuildSafeQueryWithOrderBy(pgSeriesMetadataBaseSQL, "c",
-				" LIMIT $5 OFFSET $6", "queryCount", "desc",
+				" LIMIT $6 OFFSET $7", "queryCount", "desc",
 				ValidSeriesMetadataSortFields, "queryCount", SeriesMetadataSortAliases),
 		},
 		{
 			name: "pgSeriesMetadataUnusedBaseSQL",
 			built: BuildSafeQueryWithOrderBy(pgSeriesMetadataUnusedBaseSQL, "c",
-				" LIMIT $3 OFFSET $4", "name", "desc",
+				" LIMIT $4 OFFSET $5", "name", "desc",
 				ValidSeriesMetadataSortFields, "name", SeriesMetadataSortAliases),
 		},
 		{
 			name: "pgSeriesMetadataUnusedJobBaseSQL",
 			built: BuildSafeQueryWithOrderBy(pgSeriesMetadataUnusedJobBaseSQL, "c",
-				" LIMIT $4 OFFSET $5", "name", "desc",
+				" LIMIT $5 OFFSET $6", "name", "desc",
 				ValidSeriesMetadataSortFields, "name", SeriesMetadataSortAliases),
 		},
 	}
