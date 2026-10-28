@@ -12,7 +12,7 @@ import { fromUTC } from "@/lib/utils/date-utils";
 import { DataTable, DataTableColumnHeader } from "@/components/data-table";
 import { ROUTES } from "@/lib/routes";
 import { formatUnit } from "@/lib/utils";
-import { totalSeries } from "@/lib/utils/series";
+import { seriesBreakdown, totalSeries } from "@/lib/utils/series";
 
 interface MetricsTableProps {
   metrics?: PagedResult<MetricMetadata>;
@@ -159,12 +159,7 @@ export function MetricsTable({
         return total === undefined ? (
           <span className="text-muted-foreground">—</span>
         ) : (
-          <span
-            className="tabular-nums"
-            title={Object.entries(series ?? {})
-              .map(([source, n]) => `${source}: ${n}`)
-              .join("\n")}
-          >
+          <span className="tabular-nums" title={seriesBreakdown(series)}>
             {formatUnit(total)}
           </span>
         );
