@@ -1300,8 +1300,12 @@ func (r *routes) PushMetricsUsage(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// One write per table for the whole payload: a rules collector pushes
+	// every metric of its Prometheus at once (~1000), and a transaction per
+	// metric doesn't fit the push timeout on a small database.
+	var rulesUsage []db.RulesUsage
+	var dashboardUsage []db.DashboardUsage
 	for name, metricUsage := range usage {
-		rulesUsage := make([]db.RulesUsage, 0, len(metricUsage.AlertRules)+len(metricUsage.RecordingRules))
 		for usage := range metricUsage.AlertRules {
 			rulesUsage = append(rulesUsage, db.RulesUsage{
 				Serie:      name,
@@ -1324,13 +1328,6 @@ func (r *routes) PushMetricsUsage(w http.ResponseWriter, req *http.Request) {
 			})
 		}
 
-		if err := r.dbProvider.InsertRulesUsage(ctx, rulesUsage); err != nil {
-			slog.Error("unable to insert rules usage", "err", err)
-			writeErrorResponse(req, w, fmt.Errorf("unable to insert rules usage: %w", err), http.StatusInternalServerError)
-			return
-		}
-
-		dashboardUsage := make([]db.DashboardUsage, 0, len(metricUsage.Dashboards))
 		for usage := range metricUsage.Dashboards {
 			dashboardUsage = append(dashboardUsage, db.DashboardUsage{
 				Serie: name,
@@ -1339,12 +1336,17 @@ func (r *routes) PushMetricsUsage(w http.ResponseWriter, req *http.Request) {
 				URL:   usage.URL,
 			})
 		}
+	}
 
-		if err := r.dbProvider.InsertDashboardUsage(ctx, dashboardUsage); err != nil {
-			slog.Error("unable to insert dashboard usage", "err", err)
-			writeErrorResponse(req, w, fmt.Errorf("unable to insert dashboard usage: %w", err), http.StatusInternalServerError)
-			return
-		}
+	if err := r.dbProvider.InsertRulesUsage(ctx, rulesUsage); err != nil {
+		slog.Error("unable to insert rules usage", "rules", len(rulesUsage), "err", err)
+		writeErrorResponse(req, w, fmt.Errorf("unable to insert rules usage: %w", err), http.StatusInternalServerError)
+		return
+	}
+	if err := r.dbProvider.InsertDashboardUsage(ctx, dashboardUsage); err != nil {
+		slog.Error("unable to insert dashboard usage", "dashboards", len(dashboardUsage), "err", err)
+		writeErrorResponse(req, w, fmt.Errorf("unable to insert dashboard usage: %w", err), http.StatusInternalServerError)
+		return
 	}
 }
 
