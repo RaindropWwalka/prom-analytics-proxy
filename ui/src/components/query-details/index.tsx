@@ -30,7 +30,9 @@ export function QueryDetails({ query, fingerprint }: QueryDetailsProps) {
   };
 
   return (
-    <div className="overflow-y-auto max-h-[calc(90vh-120px)] pr-4 pl-4">
+    // Fills the sheet below its header and scrolls on its own: a fixed max
+    // height left the sheet's bottom blank and cut the charts off.
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
       <div className="mb-6 p-3 bg-foreground/2 rounded-lg border flex items-center justify-between gap-3">
         <code className="text-sm font-mono flex-1 break-all">{query}</code>
         <Button

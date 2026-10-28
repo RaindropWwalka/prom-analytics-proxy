@@ -5,6 +5,7 @@ import { SortingState } from "@tanstack/react-table";
 import { type LegacyColumnDef } from "@tanstack/react-table/legacy";
 import { MetricTypeTag } from "@/components/metrics-explorer/metric-type-tag";
 import { MetricSources } from "@/components/metrics-explorer/metric-sources";
+import { MetricDescription } from "@/components/metrics-explorer/metric-description";
 import { useLocation } from "wouter";
 import { MetricMetadata, PagedResult, TableState } from "@/lib/types";
 import { fromUTC } from "@/lib/utils/date-utils";
@@ -25,6 +26,12 @@ export function MetricsTable({
   onTableStateChange,
 }: MetricsTableProps) {
   const [, setLocation] = useLocation();
+  // The one popover open in the table, if any: "<kind>:<metric>".
+  const [openPopover, setOpenPopover] = React.useState<string | null>(null);
+  const popover = (key: string) => ({
+    open: openPopover === key,
+    onOpenChange: (open: boolean) => setOpenPopover(open ? key : null),
+  });
   const prevSearchRef = React.useRef(searchQuery);
 
   // Update filter when search query changes
@@ -86,17 +93,18 @@ export function MetricsTable({
     });
   };
 
+  // Name and description have no fixed width: they share whatever the
+  // narrow columns leave, so the table follows the window's width.
   const columns: LegacyColumnDef<MetricMetadata>[] = [
     {
       accessorKey: "name",
-      size: 200,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title="Metric Name" />
       ),
       cell: ({ row }) => {
         return (
           <div
-            className="font-medium max-w-[200px] truncate cursor-pointer hover:text-blue-500"
+            className="font-medium truncate cursor-pointer hover:text-blue-500"
             title={row.getValue("name")}
             onClick={(e) => {
               e.stopPropagation();
@@ -118,27 +126,29 @@ export function MetricsTable({
     },
     {
       accessorKey: "help",
-      size: 250,
       header: "Description",
       cell: ({ row }) => (
-        <div
-          className="text-sm text-muted-foreground truncate"
-          title={row.getValue("help")}
-        >
-          {row.getValue("help")}
-        </div>
+        <MetricDescription
+          metric={row.original}
+          {...popover(`description:${row.original.name}`)}
+        />
       ),
     },
     {
       accessorKey: "sources",
-      size: 160,
+      size: 150,
       header: "Sources",
       enableSorting: false,
-      cell: ({ row }) => <MetricSources sources={row.original.sources} />,
+      cell: ({ row }) => (
+        <MetricSources
+          sources={row.original.sources}
+          {...popover(`sources:${row.original.name}`)}
+        />
+      ),
     },
     {
       accessorKey: "alertCount",
-      size: 80,
+      size: 70,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title="Alerts" />
       ),
@@ -148,7 +158,7 @@ export function MetricsTable({
     },
     {
       accessorKey: "recordCount",
-      size: 90,
+      size: 80,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title="Records" />
       ),
@@ -158,7 +168,7 @@ export function MetricsTable({
     },
     {
       accessorKey: "dashboardCount",
-      size: 110,
+      size: 100,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title="Dashboards" />
       ),
@@ -170,7 +180,7 @@ export function MetricsTable({
     },
     {
       accessorKey: "queryCount",
-      size: 120,
+      size: 110,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title="Queries (30d)" />
       ),
@@ -210,6 +220,9 @@ export function MetricsTable({
         onSortingChange={handleSortingChange}
         onFilterChange={handleFilterChange}
         onPaginationChange={handlePaginationChange}
+        onPageSizeChange={(pageSize) =>
+          onTableStateChange({ ...tableState, pageSize, page: 1 })
+        }
         onRowClick={(row) => handleMetricClick(row.name)}
       />
     </div>

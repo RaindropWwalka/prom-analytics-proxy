@@ -43,7 +43,7 @@ export function MetricsExplorerHeader({
           Browse and analyze patterns and usage of your metrics
         </p>
       </div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <Input
           placeholder="Search queries..."
           className="sm:max-w-[300px]"

@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, it, expect, vi } from "vitest";
 import { MetricSources } from "./metric-sources";
 
 describe("MetricSources", () => {
@@ -30,5 +31,38 @@ describe("MetricSources", () => {
     expect(screen.getByText("+2")).toBeInTheDocument();
     // Checked on the attribute itself: title queries collapse the newlines.
     expect(container.firstChild).toHaveAttribute("title", "a\nb\nc\nd");
+  });
+});
+
+describe("MetricSources in a table", () => {
+  it("opens the full list on click without opening the row", async () => {
+    const onRowClick = vi.fn();
+    const onOpenChange = vi.fn();
+    render(
+      <div onClick={onRowClick}>
+        <MetricSources
+          sources={["a", "b", "c", "d"]}
+          open={false}
+          onOpenChange={onOpenChange}
+        />
+      </div>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "4 sources" }));
+
+    expect(onOpenChange).toHaveBeenCalledWith(true);
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+
+  it("lists every source when open", () => {
+    render(
+      <MetricSources
+        sources={["a", "b", "c", "d"]}
+        open={true}
+        onOpenChange={() => {}}
+      />,
+    );
+    expect(screen.getByText("Reported by 4 sources")).toBeInTheDocument();
+    expect(screen.getAllByText("d")).toHaveLength(1);
   });
 });
