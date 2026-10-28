@@ -644,3 +644,7 @@ func TestQueryIngester_DrainWithGracePeriod(t *testing.T) {
 
 	mockDB.AssertExpectations(t)
 }
+
+func (m *MockDBProvider) AnalyzeUnusedMetrics(ctx context.Context, params db.UnusedAnalysisParams) ([]db.UnusedAnalysisRow, error) {
+	return nil, nil
+}

@@ -6,13 +6,31 @@ import { TableState } from "@/lib/types";
 import { LoadingState } from "./loading";
 import { useDebounce } from "@/hooks/use-debounce";
 
+// initialFilters reads filters a link can open the catalog with, as the
+// unused-metrics analysis does: ?usage=unused&job=<job>&source=<source>.
+function initialFilters(): {
+  usage: "all" | "used" | "unused";
+  job: string;
+  source: string;
+} {
+  const params = new URLSearchParams(window.location.search);
+  const usage = params.get("usage");
+  return {
+    usage: usage === "used" || usage === "unused" ? usage : "all",
+    job: params.get("job") ?? "",
+    source: params.get("source") ?? "",
+  };
+}
+
 export default function MetricsExplorer() {
+  const [initial] = useState(initialFilters);
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [usageFilter, setUsageFilter] = useState<"all" | "used" | "unused">(
-    "all",
+    initial.usage,
   );
-  const [producerFilter, setProducerFilter] = useState<string>("");
+  const [producerFilter, setProducerFilter] = useState<string>(initial.job);
+  const [sourceFilter, setSourceFilter] = useState<string>(initial.source);
   const [tableState, setTableState] = useState<TableState>({
     page: 1,
     pageSize: 10,
@@ -30,6 +48,7 @@ export default function MetricsExplorer() {
     debouncedSearchQuery,
     usageFilter,
     producerFilter,
+    sourceFilter,
   );
 
   if (isLoading) {
@@ -61,6 +80,9 @@ export default function MetricsExplorer() {
         producers={data.producers}
         producerFilter={producerFilter}
         onProducerFilterChange={setProducerFilter}
+        sources={data.sources}
+        sourceFilter={sourceFilter}
+        onSourceFilterChange={setSourceFilter}
       />
       <MetricsTable
         metrics={data.metrics}

@@ -936,3 +936,7 @@ func BenchmarkSeriesMetadataUnused_PostgreSQL_DenseUnusedScaleUp(b *testing.B) {
 		})
 	}
 }
+
+func (p *benchDBProvider) AnalyzeUnusedMetrics(ctx context.Context, params db.UnusedAnalysisParams) ([]db.UnusedAnalysisRow, error) {
+	return nil, nil
+}

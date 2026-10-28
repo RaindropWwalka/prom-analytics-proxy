@@ -52,8 +52,12 @@ export function MetricDescription({
           <dd>
             <MetricTypeTag type={metric.type} />
           </dd>
-          <dt className="text-muted-foreground">Unit</dt>
-          <dd>{metric.unit || "—"}</dd>
+          {metric.unit && (
+            <>
+              <dt className="text-muted-foreground">Unit</dt>
+              <dd>{metric.unit}</dd>
+            </>
+          )}
           <dt className="text-muted-foreground">Sources</dt>
           <dd>
             <MetricSources sources={metric.sources} max={10} />

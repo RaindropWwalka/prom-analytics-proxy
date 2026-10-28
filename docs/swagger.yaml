@@ -212,6 +212,17 @@ definitions:
       total_queries:
         type: integer
     type: object
+  db.UnusedAnalysisRow:
+    properties:
+      job:
+        type: string
+      source:
+        type: string
+      total:
+        type: integer
+      unused:
+        type: integer
+    type: object
   models.Data:
     properties:
       resultType:
@@ -426,6 +437,13 @@ definitions:
       totalPages:
         type: integer
     type: object
+  routes.UnusedAnalysisResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/db.UnusedAnalysisRow'
+        type: array
+    type: object
   time.Duration:
     enum:
     - -9223372036854775808
@@ -460,6 +478,42 @@ info:
   title: Prometheus Analytics Proxy API
   version: "1.0"
 paths:
+  /api/v1/analysis/unused:
+    get:
+      description: Count the catalog's metrics and how many are unused, per job,
+        per metadata source, or per job and source. Metrics not synced within the
+        inventory time window are left out.
+      parameters:
+      - description: job (default), source, or job,source
+        in: query
+        name: groupBy
+        type: string
+      - description: Keep only this job
+        in: query
+        name: job
+        type: string
+      - description: Keep only this source
+        in: query
+        name: source
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/routes.UnusedAnalysisResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Unused metrics analysis
+      tags:
+      - metrics
   /api/v1/configs:
     get:
       description: Get sanitized server configuration (secrets redacted) as YAML.

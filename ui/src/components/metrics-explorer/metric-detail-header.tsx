@@ -38,10 +38,13 @@ export function MetricDetailHeader({ metricName }: MetricDetailHeaderProps) {
                   <span className="text-muted-foreground">Type</span>
                   <MetricTypeTag type={metadata.type} />
                 </span>
-                <span className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Unit</span>
-                  {metadata.unit || "—"}
-                </span>
+                {/* Prometheus metadata's unit; exporters rarely set it. */}
+                {metadata.unit && (
+                  <span className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Unit</span>
+                    {metadata.unit}
+                  </span>
+                )}
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="text-muted-foreground">Sources</span>
                   <MetricSources sources={metadata.sources} max={5} />

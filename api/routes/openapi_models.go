@@ -51,3 +51,9 @@ type MetricUsageResponse struct {
 	Total      int               `json:"total"`
 	Data       []MetricUsageItem `json:"data"`
 }
+
+// UnusedAnalysisResponse is the unused-metrics analysis, largest number of
+// unused metrics first.
+type UnusedAnalysisResponse struct {
+	Data []db.UnusedAnalysisRow `json:"data"`
+}

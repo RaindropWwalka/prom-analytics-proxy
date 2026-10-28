@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { Frame, Map, Search } from "lucide-react";
+import { BarChart3, Frame, Map, Search } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { RouteComponentProps } from "wouter";
 import { Overview } from "@/app/overview";
@@ -21,6 +21,7 @@ const MetricsExplorer = lazy(() => import("@/app/metrics"));
 const MetricsDetails = lazy(() => import("@/app/metrics/details"));
 const SettingsPage = lazy(() => import("@/app/settings"));
 const QueriesPage = lazy(() => import("@/app/queries"));
+const AnalysisPage = lazy(() => import("@/app/analysis"));
 
 export const ROUTES = {
   HOME: "/",
@@ -31,6 +32,7 @@ export const ROUTES = {
   METRIC_DETAILS: "/metrics-explorer/:metric", // For backward compatibility
   SETTINGS: "/settings",
   QUERIES: "/queries",
+  ANALYSIS: "/analysis",
 } as const;
 
 export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES];
@@ -69,6 +71,18 @@ export const routeConfigs: readonly RouteConfig[] = [
     navigation: {
       name: "Metrics Catalog",
       icon: Map,
+      showInSidebar: true,
+    },
+  },
+  {
+    path: ROUTES.ANALYSIS,
+    component: AnalysisPage,
+    breadcrumb: {
+      current: "Unused Metrics Analysis",
+    },
+    navigation: {
+      name: "Analysis",
+      icon: BarChart3,
       showInSidebar: true,
     },
   },

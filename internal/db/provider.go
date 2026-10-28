@@ -48,6 +48,9 @@ type Provider interface {
 	// that report it, sorted. Names no source reports are absent.
 	GetMetricsCatalogSources(ctx context.Context, names []string) (map[string][]string, error)
 	ListMetricsCatalogSources(ctx context.Context) ([]string, error)
+	// AnalyzeUnusedMetrics counts, per job and/or source, the catalog's
+	// metrics and how many of them are unused.
+	AnalyzeUnusedMetrics(ctx context.Context, params UnusedAnalysisParams) ([]UnusedAnalysisRow, error)
 
 	GetQueryTypes(ctx context.Context, tr TimeRange, fingerprint string) (*QueryTypesResult, error)
 	GetAverageDuration(ctx context.Context, tr TimeRange, fingerprint string) (*AverageDurationResult, error)
@@ -337,4 +340,31 @@ type RecentQueriesResult struct {
 	Samples    int64     `json:"samples"`
 	Status     int       `json:"status"`
 	Timestamp  time.Time `json:"timestamp"`
+}
+
+// Ways AnalyzeUnusedMetrics can group the catalog.
+const (
+	UnusedAnalysisByJob       = "job"
+	UnusedAnalysisBySource    = "source"
+	UnusedAnalysisByJobSource = "job,source"
+)
+
+type UnusedAnalysisParams struct {
+	// GroupBy is one of the UnusedAnalysisBy* values.
+	GroupBy string
+	// Job and Source, when set, keep only that job's / source's groups.
+	Job    string
+	Source string
+	// SyncedSince leaves out catalog rows no sync has confirmed since: the
+	// summary stops refreshing those, so their usage is no longer current.
+	SyncedSince time.Time
+}
+
+// UnusedAnalysisRow is one group of the unused-metrics analysis. Job or
+// Source is empty when the analysis isn't grouped by it.
+type UnusedAnalysisRow struct {
+	Job    string `json:"job,omitempty"`
+	Source string `json:"source,omitempty"`
+	Total  int    `json:"total"`
+	Unused int    `json:"unused"`
 }
