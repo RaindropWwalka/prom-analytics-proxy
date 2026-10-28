@@ -174,3 +174,37 @@ func TestAddPeriodicJob_DeclaresTheBudgetItWasGivenNotTheInterval(t *testing.T) 
 		t.Fatal("no cycle was ever reported, so nothing was proven about the budget it declared")
 	}
 }
+
+// recordedPeriodicJob is a fakePeriodicJob that reports a last success.
+type recordedPeriodicJob struct {
+	fakePeriodicJob
+	last time.Time
+}
+
+func (r *recordedPeriodicJob) LastSuccess(context.Context) (time.Time, bool, error) {
+	return r.last, !r.last.IsZero(), nil
+}
+
+// TestAddPeriodicJob_RecordedJobWaitsOutTheInterval: leadership gained
+// right after the last successful cycle runs nothing until it's due.
+func TestAddPeriodicJob_RecordedJobWaitsOutTheInterval(t *testing.T) {
+	var g run.Group
+	job := &recordedPeriodicJob{last: time.Now()}
+
+	addPeriodicJob(&g, &fakeElector{err: context.Canceled}, "recorded-lease", time.Hour, testBudget, job)
+
+	require.ErrorIs(t, g.Run(), context.Canceled)
+	assert.Zero(t, job.runs, "the previous leader's cycle is an hour old only in an hour")
+}
+
+// TestAddPeriodicJob_RecordedJobRunsAtOnceWhenDue: a last success older
+// than the interval runs the first cycle straight away.
+func TestAddPeriodicJob_RecordedJobRunsAtOnceWhenDue(t *testing.T) {
+	var g run.Group
+	job := &recordedPeriodicJob{last: time.Now().Add(-2 * time.Hour)}
+
+	addPeriodicJob(&g, &fakeElector{err: context.Canceled}, "recorded-lease", time.Hour, testBudget, job)
+
+	require.ErrorIs(t, g.Run(), context.Canceled)
+	assert.Equal(t, 1, job.runs)
+}

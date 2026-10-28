@@ -46,6 +46,7 @@ type Syncer struct {
 	// serviceLabel, when set, has the job index record services too.
 	serviceLabel                string
 	serviceIndexRefreshInterval time.Duration
+	jobIndexRefreshInterval     time.Duration
 
 	syncDuration           prometheus.Histogram
 	syncSuccess            prometheus.Counter
@@ -229,6 +230,7 @@ func NewSyncer(dbp db.Provider, upstream string, cfg *config.Config, reg prometh
 		jobIndexWorkers:               inv.JobIndexWorkers,
 		serviceLabel:                  inv.ServiceLabel,
 		serviceIndexRefreshInterval:   inv.ServiceIndexRefreshInterval,
+		jobIndexRefreshInterval:       inv.JobIndexRefreshInterval,
 	}
 
 	if reg == nil {
@@ -303,7 +305,7 @@ func (s *Syncer) RunOnce(ctx context.Context) {
 		return
 	}
 
-	if s.jobSyncEnabled {
+	if s.jobSyncEnabled && s.jobIndexDue(cycleCtx) {
 		if err := s.syncJobIndex(cycleCtx, db.TimeRangeUntilNow(s.timeWindow)); err != nil {
 			// The run still counts as a success: the catalog and the summary
 			// both landed, and this step's outcome is separable from theirs
@@ -312,12 +314,56 @@ func (s *Syncer) RunOnce(ctx context.Context) {
 			// nothing alerts on.
 			s.jobIndexFailure.Inc()
 			slog.Error("inventory: job index", "err", err)
+		} else {
+			s.recordRun(ctx, JobIndexRunName)
 		}
 	}
 
 	slog.Info("inventory: sync complete")
 	s.syncSuccess.Inc()
 	s.syncDuration.Observe(time.Since(start).Seconds())
+	s.recordRun(ctx, InventoryRunName)
+}
+
+// Names the syncer records its successful runs under (db.SetJobLastRun).
+const (
+	InventoryRunName = "inventory"
+	JobIndexRunName  = "inventory-job-index"
+)
+
+// LastSuccess is when a sync last completed, read back across restarts so a
+// new leader doesn't start one the previous leader just finished.
+func (s *Syncer) LastSuccess(ctx context.Context) (time.Time, bool, error) {
+	return s.dbProvider.GetJobLastRun(ctx, InventoryRunName)
+}
+
+// jobIndexDue reports whether the job index step should run this sync: with
+// jobIndexRefreshInterval set, only once its last success is that old. An
+// unreadable record runs it.
+func (s *Syncer) jobIndexDue(ctx context.Context) bool {
+	if s.jobIndexRefreshInterval <= 0 {
+		return true
+	}
+	last, ok, err := s.dbProvider.GetJobLastRun(ctx, JobIndexRunName)
+	if err != nil {
+		slog.Warn("inventory: job index last run unreadable, running it", "err", err)
+		return true
+	}
+	if ok && time.Since(last) < s.jobIndexRefreshInterval {
+		slog.Info("inventory: job index fresh, skipping", "last_run", last, "refresh_interval", s.jobIndexRefreshInterval)
+		return false
+	}
+	return true
+}
+
+// recordRun notes that name succeeded now. A failed write only costs the
+// next leader an early cycle, so it's logged, not returned.
+func (s *Syncer) recordRun(ctx context.Context, name string) {
+	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := s.dbProvider.SetJobLastRun(writeCtx, name, time.Now()); err != nil {
+		slog.Warn("inventory: unable to record run", "run", name, "err", err)
+	}
 }
 
 // syncCatalogAndSummary runs the metadata-catalog sync followed by the

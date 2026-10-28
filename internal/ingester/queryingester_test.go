@@ -664,3 +664,11 @@ func (m *MockDBProvider) ReplaceMetricsCardinality(ctx context.Context, source s
 func (m *MockDBProvider) GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error) {
 	return nil, nil
 }
+
+func (m *MockDBProvider) GetJobLastRun(ctx context.Context, name string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
+func (m *MockDBProvider) SetJobLastRun(ctx context.Context, name string, at time.Time) error {
+	return nil
+}

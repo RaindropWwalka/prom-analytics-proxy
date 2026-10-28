@@ -200,6 +200,10 @@ type InventoryConfig struct {
 	// stands before the job index rewrites it; new ones are written at once.
 	// Has to stay well under TimeWindow.
 	ServiceIndexRefreshInterval time.Duration `yaml:"service_index_refresh_interval,omitempty"`
+	// JobIndexRefreshInterval skips the job index step of a sync while its
+	// last successful run is younger than this - one query per job to the
+	// upstream, the heaviest step. 0 runs it every sync.
+	JobIndexRefreshInterval time.Duration `yaml:"job_index_refresh_interval,omitempty"`
 }
 
 // MetadataSourceConfig is one Prometheus-compatible API the catalog step
@@ -677,6 +681,7 @@ func RegisterInventoryFlags(flagSet *flag.FlagSet) {
 	flagSet.DurationVar(&DefaultConfig.Inventory.JobIndexTimeout, "inventory-job-index-timeout", DefaultConfig.Inventory.JobIndexTimeout, "Timeout for the job index step as a whole (job label fetch plus every job processed)")
 	flagSet.DurationVar(&DefaultConfig.Inventory.JobIndexLabelTimeout, "inventory-job-index-label-timeout", DefaultConfig.Inventory.JobIndexLabelTimeout, "Timeout for job label values collection")
 	flagSet.DurationVar(&DefaultConfig.Inventory.JobIndexPerJobTimeout, "inventory-job-index-per-job-timeout", DefaultConfig.Inventory.JobIndexPerJobTimeout, "Timeout for processing each individual job")
+	flagSet.DurationVar(&DefaultConfig.Inventory.JobIndexRefreshInterval, "inventory-job-index-refresh-interval", DefaultConfig.Inventory.JobIndexRefreshInterval, "Skip the job index step while its last successful run is younger than this (0 runs it every sync)")
 	flagSet.IntVar(&DefaultConfig.Inventory.JobIndexWorkers, "inventory-job-index-workers", DefaultConfig.Inventory.JobIndexWorkers, "Number of worker goroutines for job index processing")
 	flagSet.BoolVar(&DefaultConfig.Inventory.MetadataSyncEnabled, "inventory-metadata-sync-enabled", DefaultConfig.Inventory.MetadataSyncEnabled, "Enable Prometheus metadata sync to populate metrics catalog (disable when OTLP ingester handles catalog population)")
 }

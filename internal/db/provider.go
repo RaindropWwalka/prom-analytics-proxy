@@ -86,6 +86,11 @@ type Provider interface {
 	GetDashboardUsage(ctx context.Context, params DashboardUsageParams) (PagedResult, error)
 	GetSeriesMetadataByNames(ctx context.Context, names []string, job string) ([]models.MetricMetadata, error)
 	DeleteQueriesBefore(ctx context.Context, cutoff time.Time) (int64, error)
+	// GetJobLastRun returns when the periodic job (or job step) name last
+	// finished successfully; false when it never has.
+	GetJobLastRun(ctx context.Context, name string) (time.Time, bool, error)
+	// SetJobLastRun records that name finished successfully at at.
+	SetJobLastRun(ctx context.Context, name string, at time.Time) error
 
 	Close() error
 }

@@ -956,3 +956,8 @@ func (p *benchDBProvider) ReplaceMetricsCardinality(ctx context.Context, source 
 func (p *benchDBProvider) GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error) {
 	return nil, nil
 }
+
+func (p *benchDBProvider) GetJobLastRun(_ context.Context, _ string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+func (p *benchDBProvider) SetJobLastRun(_ context.Context, _ string, _ time.Time) error { return nil }
