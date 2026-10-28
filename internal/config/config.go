@@ -48,9 +48,15 @@ type QueryProcessing struct {
 }
 
 type DatabaseConfig struct {
-	Provider   string           `yaml:"provider,omitempty"`
-	PostgreSQL PostgreSQLConfig `yaml:"postgresql,omitempty"`
-	SQLite     SQLiteConfig     `yaml:"sqlite,omitempty"`
+	Provider string `yaml:"provider,omitempty"`
+	// ConnectInBackground starts the proxy even when the database can't be
+	// reached: queries keep flowing to the upstream unrecorded, the API
+	// answers with errors, and the connection - migrations included - is
+	// retried in the background, the inventory and retention jobs starting
+	// once it succeeds. Off, an unreachable database stops the startup.
+	ConnectInBackground bool             `yaml:"connect_in_background,omitempty"`
+	PostgreSQL          PostgreSQLConfig `yaml:"postgresql,omitempty"`
+	SQLite              SQLiteConfig     `yaml:"sqlite,omitempty"`
 }
 
 type UpstreamConfig struct {

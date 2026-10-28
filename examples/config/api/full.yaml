@@ -22,6 +22,7 @@ producers_service_label: service # Series label splitting a job's producers per 
 # Database
 database:
   provider: "postgresql" # The provider of database to use for storing query data. Supported values: postgresql, sqlite.
+  connect_in_background: false # Start even when the database is unreachable and keep retrying it; queries are proxied unrecorded meanwhile.
   # SQLite (suitable for development)
   sqlite:
     database_path: "/etc/opt/data/prom-analytics-proxy.db" # Path to the sqlite database. (default "prom-analytics-proxy.db")

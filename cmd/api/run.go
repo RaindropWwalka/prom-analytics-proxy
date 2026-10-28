@@ -31,6 +31,7 @@ import (
 func RegisterFlags(fs *flag.FlagSet, configFile *string) {
 	fs.StringVar(configFile, "config-file", "", "Path to the configuration file, it takes precedence over the command line flags.")
 	fs.StringVar(&config.DefaultConfig.Database.Provider, "database-provider", "", "The provider of database to use for storing query data. Supported values: postgresql, sqlite.")
+	fs.BoolVar(&config.DefaultConfig.Database.ConnectInBackground, "database-connect-in-background", false, "Start even when the database is unreachable and keep retrying it in the background; queries are proxied unrecorded meanwhile.")
 	fs.BoolVar(&config.DefaultConfig.Inventory.Enabled, "inventory-enabled", config.DefaultConfig.Inventory.Enabled, "Enable the metrics inventory syncer")
 
 	fs.Uint64Var(&config.DefaultConfig.MetadataLimit, "metadata-limit", config.DefaultConfig.MetadataLimit, "The maximum number of metric metadata entries to retrieve from the upstream prometheus API. (default 0 which means no limit)")
@@ -73,10 +74,18 @@ func Run(uiFS fs.FS) error {
 
 	var g run.Group
 
-	dbProvider, err := db.GetDbProvider(context.Background(), db.DatabaseProvider(config.DefaultConfig.Database.Provider))
+	provider := db.DatabaseProvider(config.DefaultConfig.Database.Provider)
+	dbProvider, err := db.GetDbProvider(context.Background(), provider)
+	// deferred is set when the proxy starts without its database.
+	var deferred *db.DeferredProvider
 	if err != nil {
-		slog.Error("unable to create db provider", "err", err)
-		return fmt.Errorf("create db provider: %w", err)
+		if !config.DefaultConfig.Database.ConnectInBackground {
+			slog.Error("unable to create db provider", "err", err)
+			return fmt.Errorf("create db provider: %w", err)
+		}
+		slog.Warn("database unavailable: proxying queries unrecorded, connecting in the background", "err", err)
+		deferred = db.NewDeferredProvider()
+		dbProvider = deferred
 	}
 	defer func() {
 		if err := dbProvider.Close(); err != nil {
@@ -171,8 +180,50 @@ func Run(uiFS fs.FS) error {
 		})
 	}
 
-	provider := db.DatabaseProvider(config.DefaultConfig.Database.Provider)
+	if deferred == nil {
+		if err := addDatabaseJobs(&g, dbProvider, provider, reg); err != nil {
+			return err
+		}
+	} else {
+		ctx, cancel := context.WithCancel(context.Background())
+		g.Add(func() error {
+			p, err := db.ConnectWithRetry(ctx, func(ctx context.Context) (db.Provider, error) {
+				return db.GetDbProvider(ctx, provider)
+			}, time.Second, 30*time.Second)
+			if err != nil {
+				return nil // shutting down
+			}
+			deferred.Set(p)
+			slog.Info("database connected")
+			var jobs run.Group
+			if err := addDatabaseJobs(&jobs, p, provider, reg); err != nil {
+				return err
+			}
+			jobs.Add(func() error {
+				<-ctx.Done()
+				return nil
+			}, func(error) {})
+			return jobs.Run()
+		}, func(error) {
+			cancel()
+		})
+	}
 
+	{
+		g.Add(run.SignalHandler(context.Background(), syscall.SIGINT, syscall.SIGTERM))
+	}
+
+	if err := g.Run(); err != nil {
+		if !errors.As(err, &run.SignalError{}) {
+			return err
+		}
+	}
+	return nil
+}
+
+// addDatabaseJobs adds the leader-elected inventory and retention jobs, when
+// enabled, to g: they need a connected database.
+func addDatabaseJobs(g *run.Group, dbProvider db.Provider, provider db.DatabaseProvider, reg *prometheus.Registry) error {
 	// Both jobs below share one Elector instance: constructing two against
 	// the same reg would panic on duplicate metric registration.
 	var elector leaderelection.Elector
@@ -204,7 +255,7 @@ func Run(uiFS fs.FS) error {
 		if err != nil {
 			return fmt.Errorf("create inventory syncer: %w", err)
 		}
-		addPeriodicJob(&g, elector, "metric-analytics-inventory",
+		addPeriodicJob(g, elector, "metric-analytics-inventory",
 			config.DefaultConfig.Inventory.SyncInterval,
 			config.DefaultConfig.Inventory.RunTimeout, inv)
 	}
@@ -214,19 +265,9 @@ func Run(uiFS fs.FS) error {
 		if err != nil {
 			return fmt.Errorf("create retention worker: %w", err)
 		}
-		addPeriodicJob(&g, elector, "metric-analytics-retention",
+		addPeriodicJob(g, elector, "metric-analytics-retention",
 			config.DefaultConfig.Retention.Interval,
 			config.DefaultConfig.Retention.RunTimeout, retWorker)
-	}
-
-	{
-		g.Add(run.SignalHandler(context.Background(), syscall.SIGINT, syscall.SIGTERM))
-	}
-
-	if err := g.Run(); err != nil {
-		if !errors.As(err, &run.SignalError{}) {
-			return err
-		}
 	}
 	return nil
 }
