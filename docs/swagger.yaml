@@ -11,6 +11,11 @@ definitions:
     properties:
       job:
         type: string
+      source:
+        description: |-
+          Source is the Prometheus the series came from, as told by the
+          external label named by producers_source_label; empty without one.
+        type: string
       series:
         type: integer
     type: object
@@ -353,7 +358,11 @@ definitions:
         items:
           type: string
         type: array
+      last_seen_at:
+        type: string
       name:
+        type: string
+      prom_link:
         type: string
       serie:
         type: string
@@ -483,6 +492,34 @@ paths:
           schema:
             $ref: '#/definitions/models.ErrorResponse'
       summary: List jobs
+      tags:
+      - metrics
+  /api/v1/metricMetadata/{name}:
+    get:
+      description: 'Get one metric''s catalog entry: type, help, unit, usage counts
+        and the metadata sources reporting it.'
+      parameters:
+      - description: Metric name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.MetricMetadata'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Metric metadata
       tags:
       - metrics
   /api/v1/metricQueryPerformanceStatistics/{name}:

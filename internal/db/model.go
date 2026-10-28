@@ -107,7 +107,10 @@ type QueryTimeRangeDistributionResult struct {
 }
 
 type MetricProducersResult struct {
-	Job    string `json:"job"`
+	Job string `json:"job"`
+	// Source is the Prometheus the series came from, as told by the
+	// external label named by producers_source_label; empty without one.
+	Source string `json:"source,omitempty"`
 	Series int    `json:"series"`
 }
 
@@ -131,13 +134,16 @@ const (
 )
 
 type RulesUsage struct {
-	Serie      string    `json:"serie"`
-	GroupName  string    `json:"group_name"`
-	Name       string    `json:"name"`
-	Expression string    `json:"expression"`
-	Kind       string    `json:"kind"`
-	Labels     []string  `json:"labels"`
+	Serie      string   `json:"serie"`
+	GroupName  string   `json:"group_name"`
+	Name       string   `json:"name"`
+	Expression string   `json:"expression"`
+	Kind       string   `json:"kind"`
+	Labels     []string `json:"labels"`
+	// PromLink points at the rule in the Prometheus evaluating it.
+	PromLink   string    `json:"prom_link,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
 type DashboardUsage struct {

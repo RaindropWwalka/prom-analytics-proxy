@@ -18,6 +18,15 @@ import {
 import { useMetricStatistics } from "@/app/metrics/use-metrics-data";
 import { useDateRange } from "@/contexts/date-range";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const ALL_SOURCES = "__all__";
 
 interface MetricProducersProps {
   metricName: string;
@@ -26,9 +35,30 @@ interface MetricProducersProps {
 export function MetricProducers({ metricName }: MetricProducersProps) {
   const { dateRange } = useDateRange();
   const { data, isLoading } = useMetricStatistics(metricName, dateRange);
-  const producers: Producer[] = data.statistics?.producers || [];
+  const allProducers: Producer[] = React.useMemo(
+    () => data.statistics?.producers || [],
+    [data.statistics],
+  );
   // Local sorting state must be declared unconditionally to respect Hooks rules
   const [sorting, setSorting] = React.useState<SortingState>([]);
+  const [sourceFilter, setSourceFilter] = React.useState(ALL_SOURCES);
+
+  // Producers are split by source only when the proxy knows which
+  // Prometheus each series came from (producers_source_label).
+  const sources = React.useMemo(
+    () =>
+      [
+        ...new Set(allProducers.map((p) => p.source).filter(Boolean)),
+      ].sort() as string[],
+    [allProducers],
+  );
+  const producers = React.useMemo(
+    () =>
+      sourceFilter === ALL_SOURCES
+        ? allProducers
+        : allProducers.filter((p) => p.source === sourceFilter),
+    [allProducers, sourceFilter],
+  );
 
   // Calculate total series for percentage calculations (empty while loading)
   const totalSeries = producers.reduce(
@@ -57,6 +87,19 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
           <div className="font-medium">{row.getValue("job")}</div>
         ),
       },
+      ...(sources.length > 0
+        ? [
+            {
+              accessorKey: "source",
+              header: "Source",
+              cell: ({ row }) => (
+                <div className="truncate text-muted-foreground">
+                  {row.original.source || "—"}
+                </div>
+              ),
+            } satisfies LegacyColumnDef<Producer>,
+          ]
+        : []),
       {
         id: "contribution",
         header: () => <div className="text-right">Contribution</div>,
@@ -94,7 +137,7 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
         },
       },
     ],
-    [totalSeries],
+    [totalSeries, sources.length],
   );
 
   if (isLoading) {
@@ -124,10 +167,26 @@ export function MetricProducers({ metricName }: MetricProducersProps) {
           generate and expose Prometheus metrics.
           <br />
           Each producer contributes to the total number of time series in your
-          monitoring system.
+          monitoring system. The same job scraped by several Prometheus is shown
+          once per Prometheus.
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        {sources.length > 0 && (
+          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+            <SelectTrigger className="sm:w-[320px]" aria-label="Source">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_SOURCES}>All sources</SelectItem>
+              {sources.map((source) => (
+                <SelectItem key={source} value={source}>
+                  {source}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <DataTable
           data={producers}
           columns={columns}

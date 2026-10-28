@@ -53,7 +53,7 @@ func scanQueryExecution(total *int) func(*sql.Rows) (QueryExecutionRow, error) {
 func scanRulesUsage(row *sql.Rows) (RulesUsage, error) {
 	var r RulesUsage
 	var labels []byte
-	if err := row.Scan(&r.Serie, &r.GroupName, &r.Name, &r.Expression, &r.Kind, &labels, &r.CreatedAt); err != nil {
+	if err := row.Scan(&r.Serie, &r.GroupName, &r.Name, &r.Expression, &r.Kind, &labels, &r.PromLink, &r.CreatedAt, &r.LastSeenAt); err != nil {
 		return r, err
 	}
 	if len(labels) > 0 {

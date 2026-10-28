@@ -20,22 +20,35 @@ interface SerieExpressionsResponse {
   totalPages: number;
 }
 
-interface MetricUsageResponse {
+export interface MetricUsageResponse {
   total: number;
   totalPages: number;
   data: Array<{
     id?: string;
     name: string;
+    title?: string;
     url?: string;
-    groupName?: string;
+    group_name?: string;
     expression?: string;
+    prom_link?: string;
+    created_at?: string;
+    last_seen_at?: string;
   }>;
+}
+
+// UsageQuery is how a usage tab asks for one page: search and sort run on the
+// server, which sees every row rather than the page on screen.
+export interface UsageQuery {
+  sortBy?: string;
+  sortOrder?: string;
+  filter?: string;
 }
 
 interface ApiConfig {
   baseUrl: string;
   endpoints: {
     seriesMetadata: string;
+    metricMetadata: string;
     metricStatistics: string;
     metricQueryPerformanceStatistics: string;
     serieExpressions: string;
@@ -63,6 +76,7 @@ const API_CONFIG: ApiConfig = {
     process.env.NODE_ENV === "development" ? "http://localhost:9091" : "",
   endpoints: {
     seriesMetadata: "/api/v1/seriesMetadata",
+    metricMetadata: "/api/v1/metricMetadata",
     metricStatistics: "/api/v1/metricStatistics",
     metricQueryPerformanceStatistics:
       "/api/v1/metricQueryPerformanceStatistics",
@@ -188,6 +202,22 @@ export async function getSeriesMetadata(
   );
 }
 
+// getMetricMetadata returns the metric's catalog entry, or null when the
+// catalog doesn't know it (or it can't be read): the page still works
+// without it.
+export async function getMetricMetadata(
+  metricName: string,
+): Promise<MetricMetadata | null> {
+  try {
+    return await fetchApiData<MetricMetadata>(
+      API_CONFIG.endpoints.metricMetadata +
+        `/${encodeURIComponent(metricName)}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
 export async function getMetricStatistics(
   metricName: string,
   from: string,
@@ -225,9 +255,10 @@ export async function getSerieExpressions(
   pageSize: number = 10,
   from: string = "",
   to: string = "",
+  query: UsageQuery = {},
 ): Promise<SerieExpressionsResponse> {
   const url = API_CONFIG.endpoints.serieExpressions + `/${metricName}`;
-  const params: Record<string, string | number> = { page, pageSize };
+  const params: FetchOptions = { page, pageSize, ...query };
 
   if (from) {
     params.from = from;
@@ -249,9 +280,10 @@ export async function getMetricUsage(
   pageSize: number = 10,
   from: string = "",
   to: string = "",
+  query: UsageQuery = {},
 ): Promise<MetricUsageResponse> {
   const url = API_CONFIG.endpoints.metricUsage + `/${metricName}`;
-  const params: Record<string, string | number> = { kind, page, pageSize };
+  const params: FetchOptions = { kind, page, pageSize, ...query };
 
   if (from) {
     params.from = from;

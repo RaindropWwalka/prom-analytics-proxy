@@ -1,11 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   getMetricQueryPerformanceStatistics,
+  getMetricMetadata,
   getMetricStatistics,
   getSeriesMetadata,
   getSerieExpressions,
   getMetricUsage,
   getProducers,
+  type MetricUsageResponse,
+  type UsageQuery,
 } from "@/api/metrics";
 import {
   PagedResult,
@@ -25,18 +28,6 @@ interface MetricsData {
 
 interface MetricStatisticsData {
   statistics: MetricStatistics | undefined;
-}
-
-interface MetricUsageResponse {
-  total: number;
-  totalPages: number;
-  data: Array<{
-    id?: string;
-    name: string;
-    url?: string;
-    groupName?: string;
-    expression?: string;
-  }>;
 }
 
 export function useSeriesMetadataTable(
@@ -77,6 +68,13 @@ export function useSeriesMetadataTable(
     isLoading,
     error,
   };
+}
+
+export function useMetricMetadata(metricName: string) {
+  return useQuery<MetricMetadata | null>({
+    queryKey: ["metricMetadata", metricName],
+    queryFn: () => getMetricMetadata(metricName),
+  });
 }
 
 export function useMetricStatistics(
@@ -151,6 +149,7 @@ export function useMetricUsage(
   pageSize: number = 10,
   from?: Date,
   to?: Date,
+  query: UsageQuery = {},
 ) {
   const fromParam = from ? from.toISOString() : "";
   const toParam = to ? to.toISOString() : "";
@@ -164,9 +163,20 @@ export function useMetricUsage(
       pageSize,
       fromParam,
       toParam,
+      query.sortBy,
+      query.sortOrder,
+      query.filter,
     ],
     queryFn: () =>
-      getMetricUsage(metricName, kind, page, pageSize, fromParam, toParam),
+      getMetricUsage(
+        metricName,
+        kind,
+        page,
+        pageSize,
+        fromParam,
+        toParam,
+        query,
+      ),
     enabled: !!metricName && !!kind,
   });
 }
@@ -187,6 +197,11 @@ export function useSerieExpressions(
         tableState?.pageSize || 10,
         from,
         to,
+        {
+          sortBy: tableState?.sortBy,
+          sortOrder: tableState?.sortOrder,
+          filter: tableState?.filter,
+        },
       ),
     enabled: !!metricName,
   });

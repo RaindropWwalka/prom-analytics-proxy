@@ -12,6 +12,7 @@ import { LegacyColumnDef } from "@tanstack/react-table/legacy";
 import type { TableData } from "@/components/data-table/types";
 import { DateRange } from "@/lib/types";
 import { formatUnit } from "@/lib/utils";
+import { formatUTCtoLocal } from "@/lib/utils/date-utils";
 
 // Define our extended column type with maxWidth
 type ExtendedColumnDef<
@@ -32,15 +33,63 @@ interface ExpressionDataItem {
   avgDuration?: number;
   maxPeakSamples?: number;
   avgPeakySamples?: number;
+  ts?: string;
 }
 
 // Define interface for all types of metric usage items
 interface MetricUsageItem {
   id?: string;
   name: string;
+  title?: string;
   url?: string;
-  groupName?: string;
+  group_name?: string;
   expression?: string;
+  prom_link?: string;
+  created_at?: string;
+  last_seen_at?: string;
+}
+
+// Column ids the server sorts by under another name; the rest match.
+const SERVER_SORT_FIELDS: Record<string, string> = {
+  query: "queryParam",
+  title: "name",
+};
+
+function serverSort(sortBy?: string): string | undefined {
+  return sortBy ? (SERVER_SORT_FIELDS[sortBy] ?? sortBy) : undefined;
+}
+
+function formatTime(value?: string): string {
+  if (!value || value.startsWith("0001-")) return "—";
+  try {
+    return formatUTCtoLocal(value, "dd/MM/yyyy HH:mm");
+  } catch {
+    return "—";
+  }
+}
+
+// PrometheusLink shows the host of the Prometheus a rule lives in, linking
+// to the rule there.
+function PrometheusLink({ href }: { href?: string }) {
+  if (!href) return <span className="text-muted-foreground">—</span>;
+  let host = href;
+  try {
+    host = new URL(href).host;
+  } catch {
+    // not a URL: show it as is
+  }
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block truncate text-blue-500 hover:underline"
+      title={href}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {host}
+    </a>
+  );
 }
 
 // Define a generic type for tab state
@@ -146,6 +195,12 @@ const getQueriesColumns = (): ExtendedColumnDef<
       return <span>{value != null ? formatUnit(value) : "N/A"}</span>;
     },
   },
+  {
+    accessorKey: "ts",
+    enableSorting: false,
+    header: "Last run",
+    cell: ({ row }) => formatTime(row.original.ts),
+  },
 ];
 
 const getAlertsColumns = (): ExtendedColumnDef<MetricUsageItem, unknown>[] => [
@@ -156,12 +211,31 @@ const getAlertsColumns = (): ExtendedColumnDef<MetricUsageItem, unknown>[] => [
     ),
   },
   {
+    accessorKey: "group_name",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Group" />
+    ),
+    cell: ({ row }) => row.original.group_name || "—",
+  },
+  {
     accessorKey: "expression",
     maxWidth: 600,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Expression" />
     ),
     cell: ({ row }) => String(row.getValue("expression")),
+  },
+  {
+    accessorKey: "prom_link",
+    enableSorting: false,
+    header: "Prometheus",
+    cell: ({ row }) => <PrometheusLink href={row.original.prom_link} />,
+  },
+  {
+    accessorKey: "last_seen_at",
+    enableSorting: false,
+    header: "Last seen",
+    cell: ({ row }) => formatTime(row.original.last_seen_at),
   },
 ];
 
@@ -176,12 +250,31 @@ const getRecordingColumns = (): ExtendedColumnDef<
     ),
   },
   {
+    accessorKey: "group_name",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Group" />
+    ),
+    cell: ({ row }) => row.original.group_name || "—",
+  },
+  {
     accessorKey: "expression",
     maxWidth: 600,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Expression" />
     ),
     cell: ({ row }) => String(row.getValue("expression")),
+  },
+  {
+    accessorKey: "prom_link",
+    enableSorting: false,
+    header: "Prometheus",
+    cell: ({ row }) => <PrometheusLink href={row.original.prom_link} />,
+  },
+  {
+    accessorKey: "last_seen_at",
+    enableSorting: false,
+    header: "Last seen",
+    cell: ({ row }) => formatTime(row.original.last_seen_at),
   },
 ];
 
@@ -215,6 +308,13 @@ const getDashboardColumns = (): ExtendedColumnDef<
         "N/A"
       );
     },
+  },
+  {
+    accessorKey: "created_at",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="First seen" />
+    ),
+    cell: ({ row }) => formatTime(row.original.created_at),
   },
 ];
 
@@ -299,9 +399,9 @@ export default function MetricUsage({
 
   // Initialize tab states using the custom hook
   const queriesState = useTabState(1, "avgDuration", "desc");
-  const alertsState = useTabState(1);
-  const recordingsState = useTabState(1);
-  const dashboardsState = useTabState(1);
+  const alertsState = useTabState(1, "name", "asc");
+  const recordingsState = useTabState(1, "name", "asc");
+  const dashboardsState = useTabState(1, "title", "asc");
 
   // Fetch data for queries tab
   const {
@@ -313,7 +413,7 @@ export default function MetricUsage({
     {
       page: queriesState.page,
       pageSize,
-      sortBy: queriesState.sortBy || "avgDuration",
+      sortBy: serverSort(queriesState.sortBy) || "avgDuration",
       sortOrder: queriesState.sortOrder || "desc",
       filter: queriesState.filter,
       type: "all",
@@ -333,6 +433,11 @@ export default function MetricUsage({
     pageSize,
     dateRange?.from,
     dateRange?.to,
+    {
+      sortBy: serverSort(dashboardsState.sortBy),
+      sortOrder: dashboardsState.sortOrder,
+      filter: dashboardsState.filter,
+    },
   );
 
   // Fetch data for alerts tab
@@ -347,6 +452,11 @@ export default function MetricUsage({
     pageSize,
     dateRange?.from,
     dateRange?.to,
+    {
+      sortBy: serverSort(alertsState.sortBy),
+      sortOrder: alertsState.sortOrder,
+      filter: alertsState.filter,
+    },
   );
 
   // Fetch data for recording rules tab
@@ -361,6 +471,11 @@ export default function MetricUsage({
     pageSize,
     dateRange?.from,
     dateRange?.to,
+    {
+      sortBy: serverSort(recordingsState.sortBy),
+      sortOrder: recordingsState.sortOrder,
+      filter: recordingsState.filter,
+    },
   );
 
   // Initialize column definitions

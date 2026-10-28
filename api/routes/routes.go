@@ -26,6 +26,7 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,7 @@ import (
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/model"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/trace"
@@ -126,6 +128,7 @@ func WithHandlers(uiFS fs.FS, registry *prometheus.Registry, isTracingEnabled bo
 		mux.Handle("/api/v1/query/expressions", http.HandlerFunc(r.queryExpressions))
 		mux.Handle("/api/v1/seriesMetadata", http.HandlerFunc(r.seriesMetadata))
 		mux.Handle("/api/v1/metricStatistics/{name}", http.HandlerFunc(r.GetMetricStatistics))
+		mux.Handle("/api/v1/metricMetadata/{name}", http.HandlerFunc(r.metricMetadata))
 		mux.Handle("/api/v1/metricQueryPerformanceStatistics/{name}", http.HandlerFunc(r.GetMetricQueryPerformanceStatistics))
 		mux.Handle("/api/v1/serieExpressions/{name}", http.HandlerFunc(r.serieExpressions))
 		mux.Handle("/api/v1/serieUsage/{name}", http.HandlerFunc(r.GetMetricUsage))
@@ -1051,24 +1054,50 @@ func (r *routes) GetMetricStatistics(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	jobSeriesCount := make(map[string]int)
-	for _, serie := range series {
-		if job, ok := serie["job"]; ok {
-			jobSeriesCount[string(job)]++
-		}
-	}
-
 	statistics.SerieCount = len(series)
 	statistics.LabelCount = len(labels)
-	statistics.Producers = make([]db.MetricProducersResult, 0, len(jobSeriesCount))
-	for job, count := range jobSeriesCount {
-		statistics.Producers = append(statistics.Producers, db.MetricProducersResult{
-			Job:    job,
-			Series: count,
-		})
+	sourceLabel := ""
+	if r.config != nil {
+		sourceLabel = r.config.ProducersSourceLabel
 	}
+	statistics.Producers = producersOf(series, sourceLabel)
 
 	writeJSONResponse(req, w, statistics)
+}
+
+// producersOf counts a metric's series per job and, when sourceLabel is set,
+// per Prometheus too: the same job scraped by several Prometheus is several
+// producers. Series without a job aren't attributed to anyone. Largest first,
+// then by source and job, so the order is stable.
+func producersOf(series []model.LabelSet, sourceLabel string) []db.MetricProducersResult {
+	type key struct{ source, job string }
+	counts := make(map[key]int)
+	for _, serie := range series {
+		job, ok := serie["job"]
+		if !ok {
+			continue
+		}
+		k := key{job: string(job)}
+		if sourceLabel != "" {
+			k.source = string(serie[model.LabelName(sourceLabel)])
+		}
+		counts[k]++
+	}
+	producers := make([]db.MetricProducersResult, 0, len(counts))
+	for k, n := range counts {
+		producers = append(producers, db.MetricProducersResult{Job: k.job, Source: k.source, Series: n})
+	}
+	sort.Slice(producers, func(i, j int) bool {
+		a, b := producers[i], producers[j]
+		if a.Series != b.Series {
+			return a.Series > b.Series
+		}
+		if a.Source != b.Source {
+			return a.Source < b.Source
+		}
+		return a.Job < b.Job
+	})
+	return producers
 }
 
 // @Summary Get metric query performance statistics
@@ -1258,6 +1287,7 @@ func (r *routes) PushMetricsUsage(w http.ResponseWriter, req *http.Request) {
 			rulesUsage = append(rulesUsage, db.RulesUsage{
 				Serie:      name,
 				GroupName:  usage.GroupName,
+				PromLink:   usage.PromLink,
 				Name:       usage.Name,
 				Expression: usage.Expression,
 				Kind:       string(db.RuleUsageKindAlert),
@@ -1268,6 +1298,7 @@ func (r *routes) PushMetricsUsage(w http.ResponseWriter, req *http.Request) {
 			rulesUsage = append(rulesUsage, db.RulesUsage{
 				Serie:      name,
 				GroupName:  usage.GroupName,
+				PromLink:   usage.PromLink,
 				Name:       usage.Name,
 				Expression: usage.Expression,
 				Kind:       string(db.RuleUsageKindRecord),
@@ -1430,6 +1461,31 @@ func (r *routes) listJobs(w http.ResponseWriter, req *http.Request) {
 	writeJSONResponse(req, w, struct {
 		Data []string `json:"data"`
 	}{Data: jobs})
+}
+
+// @Summary Metric metadata
+// @Description Get one metric's catalog entry: type, help, unit, usage counts and the metadata sources reporting it.
+// @Tags metrics
+// @Produce json
+// @Param name path string true "Metric name"
+// @Success 200 {object} models.MetricMetadata
+// @Failure 404 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /api/v1/metricMetadata/{name} [get]
+func (r *routes) metricMetadata(w http.ResponseWriter, req *http.Request) {
+	name := req.PathValue("name")
+	found, err := r.dbProvider.GetSeriesMetadataByNames(req.Context(), []string{name}, "")
+	if err != nil {
+		slog.Error("unable to retrieve metric metadata", "err", err, "name", name)
+		writeErrorResponse(req, w, fmt.Errorf("unable to retrieve metric metadata: %w", err), http.StatusInternalServerError)
+		return
+	}
+	if len(found) == 0 {
+		writeErrorResponse(req, w, fmt.Errorf("metric %q is not in the catalog", name), http.StatusNotFound)
+		return
+	}
+	r.attachSources(req.Context(), found[:1])
+	writeJSONResponse(req, w, found[0])
 }
 
 // @Summary List metadata sources
