@@ -14,6 +14,7 @@
 
 - [Overview](#overview)
 - [Architecture](#architecture)
+- [Running in front of Thanos](#running-in-front-of-thanos)
 - [Quick Start](#quick-start)
 - [Features](#features)
 - [Project Structure](#project-structure)
@@ -46,15 +47,25 @@ graph TB
     subgraph proxy["prom-analytics-proxy :9091"]
         D[Proxy Layer]
         E[Analytics Collection]
-        F[Web Dashboard]
+        F[Web UI and API]
+        J["Background jobs<br/>(leader-elected)<br/>inventory, retention"]
     end
 
     subgraph storage["Storage Layer"]
-        G[(PostgreSQL/SQLite<br/>Query History)]
+        G[(PostgreSQL/SQLite<br/>queries, catalog,<br/>usage, job index)]
     end
 
     subgraph backend["Metrics Backend"]
         H[Prometheus/Thanos/Cortex<br/>:9090]
+    end
+
+    subgraph sources["Metadata sources (optional)"]
+        P1[Prometheus A]
+        P2[Prometheus B]
+    end
+
+    subgraph usage["perses/metrics-usage (optional)"]
+        M[Rules and dashboards collector]
     end
 
     A -->|"① Configure datasource to :9091"| D
@@ -66,6 +77,13 @@ graph TB
     D -->|"Capture metadata"| E
     E -->|"Store analytics"| G
     F -->|"Display insights"| G
+    J -->|"Metric names, job index"| H
+    J -->|"Metadata, TSDB status"| P1
+    J -->|"Metadata, TSDB status"| P2
+    J -->|"Catalog, summary"| G
+    M -->|"Alerting/recording rules"| P1
+    M -->|"Dashboards"| A
+    M -->|"POST /api/v1/metrics"| F
 ```
 
 ### How It Works
@@ -76,6 +94,8 @@ graph TB
 4. **Result Passthrough**: Query results are returned to the client transparently, maintaining full compatibility
 5. **Data Storage**: Analytics data is stored in PostgreSQL or SQLite for analysis
 6. **Visualization**: The built-in web UI provides insights into your query patterns and performance
+7. **Metrics inventory** (optional): a background job, run by one replica at a time, builds the metrics catalog (name, type, help, unit, series) from the upstream or from a list of Prometheus servers, and indexes which job and service produce each metric
+8. **Rules and dashboards usage** (optional): [perses/metrics-usage](https://github.com/perses/metrics-usage) reads alerting and recording rules from Prometheus and dashboards from Grafana and pushes which metrics they use to the proxy, so a metric only used by an alert or a dashboard isn't reported as unused
 
 ### Key Points
 
@@ -84,6 +104,66 @@ graph TB
 - No changes are required to your metrics backend
 - The proxy supports all PromQL query types (instant, range, series, labels, etc.)
 - Works with Prometheus, Thanos, Cortex, and any Prometheus-compatible backend
+
+## Running in front of Thanos
+
+Thanos is the setup this needs most care for: Thanos Receive keeps no metric metadata, so `/api/v1/metadata` through the Querier is empty, and the query-frontend's results cache drops query stats. The proxy goes in front of the query-frontend, reads metadata and cardinality from the Prometheus servers themselves, and metrics-usage reads rules from those same servers.
+
+```mermaid
+graph LR
+    subgraph clients["Query clients"]
+        G[Grafana]
+    end
+
+    subgraph pap["prom-analytics-proxy"]
+        PX[Proxy]
+        INV[Inventory job]
+        DB[(PostgreSQL)]
+    end
+
+    subgraph thanos["Thanos"]
+        QF[Query Frontend<br/>results cache]
+        Q[Querier]
+        R[Receive]
+        SG[Store Gateway]
+        OBJ[(Object storage)]
+    end
+
+    subgraph prom["Prometheus servers"]
+        P1[Prometheus A]
+        P2[Prometheus B]
+    end
+
+    MU[perses/metrics-usage]
+
+    G -->|"datasource: proxy"| PX
+    PX -->|"PromQL"| QF
+    QF --> Q
+    Q --> R
+    Q --> SG
+    SG --> OBJ
+    R --> OBJ
+    P1 -->|"remote write"| R
+    P2 -->|"remote write"| R
+    PX -->|"queries, headers, stats"| DB
+    INV -->|"metric names,<br/>job and service index"| QF
+    INV -->|"metadata,<br/>/api/v1/status/tsdb"| P1
+    INV -->|"metadata,<br/>/api/v1/status/tsdb"| P2
+    INV --> DB
+    MU -->|"/api/v1/rules"| P1
+    MU -->|"/api/v1/rules"| P2
+    MU -->|"dashboards"| G
+    MU -->|"POST /api/v1/metrics"| PX
+```
+
+What to configure:
+
+- **Upstream**: the query-frontend (`--upstream http://thanos-query-frontend:9090`), so queries keep its caching and splitting.
+- **Catalog metadata**: list the Prometheus servers that remote-write into Receive under `inventory.metadata_sources`, with their basic auth or TLS settings. Without it the catalog has names only (`inventory.metadata_metrics_name_only: true`).
+- **Cardinality**: `inventory.cardinality_limit` and `cardinality_cover_metadata` read head series per metric from each source's `/api/v1/status/tsdb` (at most 10000 metrics per source); `inventory.job_sync_enabled` adds series per job counted through Thanos, which covers the rest.
+- **Samples per query**: the proxy asks for `stats=all` (`upstream.include_query_stats: true`), but the query-frontend's results cache strips stats from range queries unless it runs with `--query-frontend.force-query-stats`. Even then, a partially cached range query reports samples only for the part it didn't have cached.
+- **Query origins**: Grafana sends `x-dashboard-uid`, `x-panel-id`, `fromalert` and `x-rule-*` headers; list the ones to keep under `query_processing.extract_http_headers` to see which dashboard or alert ran each query.
+- **Rules and dashboards**: run metrics-usage with one `rules_collectors` entry per Prometheus (the same list as `metadata_sources`) and a `grafana_collector`, all pushing to the proxy.
 
 ## Quick Start
 
@@ -158,7 +238,16 @@ See the [examples/](examples/) directory for configuration templates and integra
 - Integration with Perses Metrics Usage
 - Multi-source data correlation
 - Comprehensive metrics tracking
+- Pushed usage is accepted at once and written in the background, one payload at a time
 - [Learn more about Metrics Usage Integration](#metrics-usage-integration)
+
+### Metrics Catalog and Inventory
+
+- Catalog read from the upstream or from several Prometheus servers (`inventory.metadata_sources`), with which source reports each metric
+- Series per metric from each source's TSDB status, and per job and service from the job index
+- Filters by source, job, service and usage; metric page with description, producers per source and service, and every alert, rule, dashboard and query using it
+- Unused metrics analysis grouped by job, service and source, with series and unused series
+- Background jobs wait out their interval across restarts and deploys instead of running a full cycle on every new leader
 
 ### Data Storage
 
@@ -178,12 +267,14 @@ See the [examples/](examples/) directory for configuration templates and integra
 - Query performance visualization
 - Query Shortcuts for common patterns
 - Real-time analytics
+- Query executions filtered by status, origin (dashboard, alert, other) and headers, with who sent each one
 
 ### High availability
 
 - Supported by default when database provider is set to `PostgreSQL`
   - either flag `-database-provider=postgresql`
   - or in config.yaml `database.provider: postgresql`
+- With `database.connect_in_background: true` the proxy starts even when the database is down: queries keep flowing to the upstream unrecorded while it reconnects
 
 ## Project Structure
 
@@ -228,6 +319,15 @@ postgresql-password: "password"
 
 # SQLite
 sqlite-database-path: "prom-analytics-proxy.db"
+```
+
+The proxy stops at startup when the database can't be reached. In front of a backend that dashboards depend on, let it start anyway:
+
+```yaml
+database:
+  connect_in_background: true # Proxy queries unrecorded and retry the database (and its
+                              # migrations) in the background; the inventory and retention
+                              # jobs start once it connects (default: false)
 ```
 
 ### Performance Tuning
@@ -510,6 +610,8 @@ The `prom-analytics-proxy` application integrates with Perses Metrics Usage to g
 
 Because Metrics Usage is a separate project, you must deploy it alongside `prom-analytics-proxy` to enable this feature. Once configured, `prom-analytics-proxy` sends the collected data to the Metrics Usage backend, which is then displayed in the Metrics Usage UI. For more information, see the [Metrics Usage repository](https://github.com/perses/metrics-usage).
 
+Metrics Usage pushes each collector's whole result in one request (`POST /api/v1/metrics`) and gives up after a fixed 30s. The proxy answers `202 Accepted` straight away and writes queued payloads one at a time in the background, each bounded by `server.push_metrics_usage_timeout` (default 30s); a full queue answers `503`.
+
 **Try it out:** The [proxy-only](examples/demo/proxy-only) and [full](examples/demo/full) demos include complete setups with Metrics Usage integration. Configuration files are available in [examples/proxy/config/metrics-usage/](examples/demo/proxy-only/config/metrics-usage/).
 
 ### Inventory Configuration
@@ -623,6 +725,17 @@ The proxy provides several API endpoints for accessing query analytics and metri
 - `type` (string): Filter by metric type - `counter`, `gauge`, `histogram`, `summary`, etc.
 - `usage` (string): Filter metrics by usage state - `all`, `used`, or `unused`
 - `job` (string): Filter to show metrics produced by a specific job
+- `service` (string): Filter to show metrics produced by a specific service
+- `source` (string): Filter to show metrics a specific metadata source reports
+
+Each item carries `sources` and `series` (head series per source; a metric no source counted falls back to its series summed over the job index, under `upstream`).
+
+### Inventory
+
+- `GET /api/v1/sources` - Metadata sources that report metrics
+- `GET /api/v1/services` - Services seen by the job index
+- `GET /api/v1/metricMetadata/{name}` - One metric's type, help, unit, sources and series
+- `GET /api/v1/analysis/unused?groupBy=job[,service][,source]` - Metrics and series per group, and how many of them are unused
 
 #### Examples
 
