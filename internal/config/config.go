@@ -158,11 +158,13 @@ type InventoryConfig struct {
 	// CardinalityLimit is how many of each metadata source's largest metrics
 	// (by head series, from /api/v1/status/tsdb) the catalog step records;
 	// 0 records none. Name-only sources - a Thanos Querier has no TSDB
-	// status to give - are skipped.
+	// status to give - are skipped. Capped at 10000, the most Prometheus
+	// returns.
 	CardinalityLimit uint64 `yaml:"cardinality_limit,omitempty"`
 	// CardinalityCoverMetadata asks each source for as many metrics as it
 	// reported to the catalog this sync - at least CardinalityLimit - so every
-	// metric it has gets its series count, not just the largest ones.
+	// metric it has gets its series count, not just the largest ones - up to
+	// 10000; a source with more misses the smallest.
 	CardinalityCoverMetadata bool          `yaml:"cardinality_cover_metadata,omitempty"`
 	SyncInterval             time.Duration `yaml:"sync_interval,omitempty"`
 	TimeWindow               time.Duration `yaml:"time_window,omitempty"`

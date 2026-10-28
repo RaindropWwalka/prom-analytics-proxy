@@ -325,6 +325,10 @@ func TestSyncer_CardinalityLimitCoversWhatASourceReported(t *testing.T) {
 	assert.Equal(t, uint64(1000), s.cardinalityLimitFor(48902), "without covering, the fixed top-N")
 
 	s.cardinalityCoverMetadata = true
-	assert.Equal(t, uint64(48902), s.cardinalityLimitFor(48902), "every metric the source reported")
+	assert.Equal(t, uint64(4890), s.cardinalityLimitFor(4890), "every metric the source reported")
 	assert.Equal(t, uint64(1000), s.cardinalityLimitFor(300), "never below the configured limit")
+	assert.Equal(t, uint64(10000), s.cardinalityLimitFor(48902), "never over what Prometheus accepts")
+
+	s = &Syncer{cardinalityLimit: 50000}
+	assert.Equal(t, uint64(10000), s.cardinalityLimitFor(0), "a configured limit over the maximum too")
 }

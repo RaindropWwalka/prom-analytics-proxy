@@ -527,14 +527,20 @@ func (s *Syncer) readsCardinality(src metadataSource) bool {
 	return !nameOnly
 }
 
+// maxCardinalityLimit is the largest limit Prometheus accepts on
+// /api/v1/status/tsdb; above it the request fails with bad_data.
+const maxCardinalityLimit = 10000
+
 // cardinalityLimitFor is how many metrics a source that reported
 // catalogued metrics is asked for: cardinalityLimit, or with
-// cardinalityCoverMetadata all of them if there are more.
+// cardinalityCoverMetadata all of them if there are more - never over
+// maxCardinalityLimit.
 func (s *Syncer) cardinalityLimitFor(catalogued int) uint64 {
-	if s.cardinalityCoverMetadata && uint64(catalogued) > s.cardinalityLimit {
-		return uint64(catalogued)
+	limit := s.cardinalityLimit
+	if s.cardinalityCoverMetadata && uint64(catalogued) > limit {
+		limit = uint64(catalogued)
 	}
-	return s.cardinalityLimit
+	return min(limit, maxCardinalityLimit)
 }
 
 // fetchCardinality reads src's head series per metric, its top limit. It
