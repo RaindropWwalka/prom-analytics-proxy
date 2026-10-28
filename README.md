@@ -537,6 +537,8 @@ inventory:
   summary_step_timeout: 30s  # Timeout for usage summary refresh (default: 30s)
   job_sync_enabled: false    # Build the per-job metric index (default: false)
                              # Needed for the job filter and the unused-metrics analysis by job.
+  service_label: service     # Also index which service of each job produces each metric,
+                             # from the same per-job query (default: service; "" = jobs only)
                              # When true, job_index_timeout counts toward run_timeout's minimum.
   job_index_timeout: 210s    # Timeout for the job index step as a whole (default: 210s)
   job_index_label_timeout: 30s   # Timeout for job label fetch (default: 30s)

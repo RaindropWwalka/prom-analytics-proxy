@@ -41,6 +41,8 @@ type Syncer struct {
 	jobIndexPerJobTimeout time.Duration
 
 	jobIndexWorkers int
+	// serviceLabel, when set, has the job index record services too.
+	serviceLabel string
 
 	syncDuration           prometheus.Histogram
 	syncSuccess            prometheus.Counter
@@ -220,6 +222,7 @@ func NewSyncer(dbp db.Provider, upstream string, cfg *config.Config, reg prometh
 		jobIndexLabelTimeout:          inv.JobIndexLabelTimeout,
 		jobIndexPerJobTimeout:         inv.JobIndexPerJobTimeout,
 		jobIndexWorkers:               inv.JobIndexWorkers,
+		serviceLabel:                  inv.ServiceLabel,
 	}
 
 	if reg == nil {

@@ -648,3 +648,11 @@ func TestQueryIngester_DrainWithGracePeriod(t *testing.T) {
 func (m *MockDBProvider) AnalyzeUnusedMetrics(ctx context.Context, params db.UnusedAnalysisParams) ([]db.UnusedAnalysisRow, error) {
 	return nil, nil
 }
+
+func (m *MockDBProvider) UpsertMetricsServiceIndex(ctx context.Context, items []db.MetricServiceIndexItem) error {
+	return nil
+}
+
+func (m *MockDBProvider) ListServices(ctx context.Context) ([]string, error) {
+	return nil, nil
+}

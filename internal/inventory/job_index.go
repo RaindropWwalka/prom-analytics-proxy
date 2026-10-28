@@ -87,7 +87,8 @@ func (s *Syncer) syncJobIndex(ctx context.Context, tr db.TimeRange) error {
 	return nil
 }
 
-// processJob queries one job's metric names and commits them. Both calls are
+// processJob queries one job's metric names - and, with a service label,
+// which service produces each - and commits them. Both calls are
 // bounded by jobIndexPerJobTimeout, so a job stuck on an upstream query or a
 // database lock costs its own budget rather than the whole step's, and the
 // worker is back on the fan-out channel either way.
@@ -95,7 +96,11 @@ func (s *Syncer) processJob(ctx context.Context, job string, tr db.TimeRange, wo
 	jobCtx, cancelJob := context.WithTimeout(ctx, s.jobIndexPerJobTimeout)
 	defer cancelJob()
 
-	query := fmt.Sprintf(`group({job="%s", __name__=~".+"}) by (__name__)`, job)
+	by := "__name__"
+	if s.serviceLabel != "" {
+		by += ", " + s.serviceLabel
+	}
+	query := fmt.Sprintf(`group({job="%s", __name__=~".+"}) by (%s)`, job, by)
 	result, _, _, err := s.promAPI.Query(jobCtx, query, tr.To())
 	if err != nil {
 		slog.Warn("failed to query metrics for job", "job", job, "worker", workerID, "query", query, "err", err)
@@ -103,12 +108,21 @@ func (s *Syncer) processJob(ctx context.Context, job string, tr db.TimeRange, wo
 	}
 
 	metricNames := make(map[string]struct{})
+	var services []db.MetricServiceIndexItem
 
 	switch v := result.(type) {
 	case model.Vector:
 		for _, sample := range v {
-			if metricName, ok := sample.Metric["__name__"]; ok {
-				metricNames[string(metricName)] = struct{}{}
+			metricName, ok := sample.Metric["__name__"]
+			if !ok {
+				continue
+			}
+			metricNames[string(metricName)] = struct{}{}
+			if s.serviceLabel == "" {
+				continue
+			}
+			if service := sample.Metric[model.LabelName(s.serviceLabel)]; service != "" {
+				services = append(services, db.MetricServiceIndexItem{Name: string(metricName), Service: string(service), Job: job})
 			}
 		}
 	default:
@@ -126,6 +140,12 @@ func (s *Syncer) processJob(ctx context.Context, job string, tr db.TimeRange, wo
 			return fmt.Errorf("upsert job %s: %w", job, err)
 		}
 		slog.Debug("processed job", "job", job, "worker", workerID, "metrics", len(items))
+	}
+	if len(services) > 0 {
+		if err := s.dbProvider.UpsertMetricsServiceIndex(jobCtx, services); err != nil {
+			slog.Error("failed to upsert services for job", "job", job, "worker", workerID, "services", len(services), "err", err)
+			return fmt.Errorf("upsert services of job %s: %w", job, err)
+		}
 	}
 
 	return nil

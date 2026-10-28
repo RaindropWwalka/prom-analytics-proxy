@@ -8,6 +8,7 @@ import {
   getMetricUsage,
   getProducers,
   getSources,
+  getServices,
   type MetricUsageResponse,
   type UsageQuery,
 } from "@/api/metrics";
@@ -26,6 +27,7 @@ interface MetricsData {
   metrics: PagedResult<MetricMetadata> | undefined;
   producers: string[] | undefined;
   sources: string[] | undefined;
+  services: string[] | undefined;
 }
 
 interface MetricStatisticsData {
@@ -38,13 +40,14 @@ export function useSeriesMetadataTable(
   usage?: "all" | "used" | "unused",
   job?: string,
   source?: string,
+  service?: string,
 ) {
   const {
     data: metrics,
     isLoading,
     error,
   } = useQuery<PagedResult<MetricMetadata>>({
-    queryKey: ["metrics", tableState, searchQuery, usage, job, source],
+    queryKey: ["metrics", tableState, searchQuery, usage, job, source, service],
     queryFn: () =>
       getSeriesMetadata(
         tableState?.page || 1,
@@ -56,6 +59,7 @@ export function useSeriesMetadataTable(
         usage || "all",
         job,
         source,
+        service,
       ),
   });
 
@@ -69,11 +73,17 @@ export function useSeriesMetadataTable(
     queryFn: getSources,
   });
 
+  const { data: services } = useQuery<string[]>({
+    queryKey: ["services"],
+    queryFn: getServices,
+  });
+
   return {
     data: {
       metrics,
       producers,
       sources,
+      services,
     } as MetricsData,
     isLoading,
     error,

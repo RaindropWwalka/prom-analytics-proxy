@@ -53,6 +53,22 @@ func testAnalyzeUnusedMetrics(t *testing.T, b testBackend) {
 		{Job: "api", Source: "source-a", Total: 1, Unused: 0},
 	}, analyze(UnusedAnalysisParams{GroupBy: UnusedAnalysisByJobSource, Job: "api", Source: "source-a"}))
 
+	require.NoError(t, p.UpsertMetricsServiceIndex(ctx, []MetricServiceIndexItem{
+		{Name: "m1", Service: "billing", Job: "api"},
+		{Name: "m2", Service: "billing", Job: "api"},
+		{Name: "m2", Service: "billing", Job: "other"}, // counts once for its service
+		{Name: "m3", Service: "metrics", Job: "node"},
+	}))
+	assert.Equal(t, []UnusedAnalysisRow{
+		{Service: "billing", Total: 2, Unused: 1},
+		{Service: "metrics", Total: 1, Unused: 1},
+	}, analyze(UnusedAnalysisParams{GroupBy: UnusedAnalysisByService}))
+	assert.Equal(t, []UnusedAnalysisRow{
+		{Service: "billing", Source: "source-b", Total: 1, Unused: 1},
+		{Service: "metrics", Source: "source-a", Total: 1, Unused: 1},
+		{Service: "billing", Source: "source-a", Total: 1, Unused: 0},
+	}, analyze(UnusedAnalysisParams{GroupBy: UnusedAnalysisByServiceSource}))
+
 	_, err := p.AnalyzeUnusedMetrics(ctx, UnusedAnalysisParams{GroupBy: "pod"})
 	assert.Error(t, err)
 }

@@ -14,6 +14,9 @@ describe("analysis utils", () => {
     expect(groupLabel(row, "source")).toBe("source-a");
     expect(groupLabel(row, "job,source")).toBe("api @ source-a");
     expect(groupLabel({ total: 1, unused: 0 }, "job")).toBe("—");
+    expect(groupLabel({ ...row, service: "billing" }, "service,source")).toBe(
+      "billing @ source-a",
+    );
   });
 
   it("rounds the unused share and survives an empty group", () => {
@@ -27,6 +30,9 @@ describe("analysis utils", () => {
     );
     expect(catalogLink({ job: "api", total: 1, unused: 1 })).toBe(
       "/metrics-explorer?usage=unused&job=api",
+    );
+    expect(catalogLink({ service: "billing", total: 1, unused: 1 })).toBe(
+      "/metrics-explorer?usage=unused&service=billing",
     );
   });
 

@@ -134,6 +134,7 @@ func WithHandlers(uiFS fs.FS, registry *prometheus.Registry, isTracingEnabled bo
 		mux.Handle("/api/v1/serieUsage/{name}", http.HandlerFunc(r.GetMetricUsage))
 		mux.Handle("/api/v1/jobs", http.HandlerFunc(r.listJobs))
 		mux.Handle("/api/v1/sources", http.HandlerFunc(r.listSources))
+		mux.Handle("/api/v1/services", http.HandlerFunc(r.listServices))
 		mux.Handle("/api/v1/analysis/unused", http.HandlerFunc(r.analyzeUnused))
 		mux.Handle("/api/v1/metrics/unused", http.HandlerFunc(r.metricsUnused))
 
@@ -899,6 +900,7 @@ func (r *routes) queryExecutions(w http.ResponseWriter, req *http.Request) {
 // @Param usage query string false "Filter by usage type (all, used, unused)"
 // @Param job query string false "Filter by job label"
 // @Param source query string false "Filter by the metadata source reporting the metric"
+// @Param service query string false "Filter by the service producing the metric"
 // @Param unused query bool false "Filter for unused metrics only"
 // @Success 200 {object} SeriesMetadataResponse
 // @Failure 400 {object} models.ErrorResponse
@@ -971,6 +973,7 @@ func (r *routes) seriesMetadata(w http.ResponseWriter, req *http.Request) {
 		params.Job = job
 	}
 	params.Source = req.FormValue("source")
+	params.Service = req.FormValue("service")
 
 	data, err := r.dbProvider.GetSeriesMetadata(req.Context(), params)
 	if err != nil {
@@ -1057,21 +1060,22 @@ func (r *routes) GetMetricStatistics(w http.ResponseWriter, req *http.Request) {
 
 	statistics.SerieCount = len(series)
 	statistics.LabelCount = len(labels)
-	sourceLabel := ""
+	var sourceLabel, serviceLabel string
 	if r.config != nil {
-		sourceLabel = r.config.ProducersSourceLabel
+		sourceLabel, serviceLabel = r.config.ProducersSourceLabel, r.config.ProducersServiceLabel
 	}
-	statistics.Producers = producersOf(series, sourceLabel)
+	statistics.Producers = producersOf(series, sourceLabel, serviceLabel)
 
 	writeJSONResponse(req, w, statistics)
 }
 
-// producersOf counts a metric's series per job and, when sourceLabel is set,
-// per Prometheus too: the same job scraped by several Prometheus is several
-// producers. Series without a job aren't attributed to anyone. Largest first,
-// then by source and job, so the order is stable.
-func producersOf(series []model.LabelSet, sourceLabel string) []db.MetricProducersResult {
-	type key struct{ source, job string }
+// producersOf counts a metric's series per job and, when sourceLabel and
+// serviceLabel are set, per Prometheus and per service too: the same job
+// scraped by several Prometheus, or one exporter job carrying many services,
+// is several producers. Series without a job aren't attributed to anyone.
+// Largest first, then by source, job and service, so the order is stable.
+func producersOf(series []model.LabelSet, sourceLabel, serviceLabel string) []db.MetricProducersResult {
+	type key struct{ source, job, service string }
 	counts := make(map[key]int)
 	for _, serie := range series {
 		job, ok := serie["job"]
@@ -1082,11 +1086,14 @@ func producersOf(series []model.LabelSet, sourceLabel string) []db.MetricProduce
 		if sourceLabel != "" {
 			k.source = string(serie[model.LabelName(sourceLabel)])
 		}
+		if serviceLabel != "" {
+			k.service = string(serie[model.LabelName(serviceLabel)])
+		}
 		counts[k]++
 	}
 	producers := make([]db.MetricProducersResult, 0, len(counts))
 	for k, n := range counts {
-		producers = append(producers, db.MetricProducersResult{Job: k.job, Source: k.source, Series: n})
+		producers = append(producers, db.MetricProducersResult{Job: k.job, Source: k.source, Service: k.service, Series: n})
 	}
 	sort.Slice(producers, func(i, j int) bool {
 		a, b := producers[i], producers[j]
@@ -1096,7 +1103,10 @@ func producersOf(series []model.LabelSet, sourceLabel string) []db.MetricProduce
 		if a.Source != b.Source {
 			return a.Source < b.Source
 		}
-		return a.Job < b.Job
+		if a.Job != b.Job {
+			return a.Job < b.Job
+		}
+		return a.Service < b.Service
 	})
 	return producers
 }
@@ -1508,12 +1518,32 @@ func (r *routes) listSources(w http.ResponseWriter, req *http.Request) {
 	writeJSONResponse(req, w, models.SourcesResponse{Data: sources})
 }
 
+// @Summary List services
+// @Description Get the services the job index found producing metrics (inventory.service_label).
+// @Tags metrics
+// @Produce json
+// @Success 200 {object} models.JobsResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /api/v1/services [get]
+func (r *routes) listServices(w http.ResponseWriter, req *http.Request) {
+	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+	defer cancel()
+	services, err := r.dbProvider.ListServices(ctx)
+	if err != nil {
+		slog.Error("unable to list services", "err", err)
+		writeErrorResponse(req, w, fmt.Errorf("unable to list services: %w", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(req, w, models.JobsResponse{Data: services})
+}
+
 // @Summary Unused metrics analysis
 // @Description Count the catalog's metrics and how many are unused, per job, per metadata source, or per job and source. Metrics not synced within the inventory time window are left out.
 // @Tags metrics
 // @Produce json
-// @Param groupBy query string false "job (default), source, or job,source"
+// @Param groupBy query string false "job (default), service, source, job,source or service,source"
 // @Param job query string false "Keep only this job"
+// @Param service query string false "Keep only this service"
 // @Param source query string false "Keep only this source"
 // @Success 200 {object} UnusedAnalysisResponse
 // @Failure 400 {object} models.ErrorResponse
@@ -1525,9 +1555,10 @@ func (r *routes) analyzeUnused(w http.ResponseWriter, req *http.Request) {
 		groupBy = db.UnusedAnalysisByJob
 	}
 	switch groupBy {
-	case db.UnusedAnalysisByJob, db.UnusedAnalysisBySource, db.UnusedAnalysisByJobSource:
+	case db.UnusedAnalysisByJob, db.UnusedAnalysisBySource, db.UnusedAnalysisByJobSource,
+		db.UnusedAnalysisByService, db.UnusedAnalysisByServiceSource:
 	default:
-		writeErrorResponse(req, w, fmt.Errorf("groupBy must be job, source or job,source (got %q)", groupBy), http.StatusBadRequest)
+		writeErrorResponse(req, w, fmt.Errorf("groupBy must be job, service, source, job,source or service,source (got %q)", groupBy), http.StatusBadRequest)
 		return
 	}
 	window := config.DefaultConfig.Inventory.TimeWindow
@@ -1537,6 +1568,7 @@ func (r *routes) analyzeUnused(w http.ResponseWriter, req *http.Request) {
 	rows, err := r.dbProvider.AnalyzeUnusedMetrics(req.Context(), db.UnusedAnalysisParams{
 		GroupBy:     groupBy,
 		Job:         req.FormValue("job"),
+		Service:     req.FormValue("service"),
 		Source:      req.FormValue("source"),
 		SyncedSince: time.Now().Add(-window),
 	})

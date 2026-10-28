@@ -36,6 +36,10 @@ type Provider interface {
 	RefreshMetricsUsageSummary(ctx context.Context, tr TimeRange) error
 	UpsertMetricsJobIndex(ctx context.Context, items []MetricJobIndexItem) error
 	ListJobs(ctx context.Context) ([]string, error)
+	// UpsertMetricsServiceIndex records which service of which job produces
+	// each metric.
+	UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem) error
+	ListServices(ctx context.Context) ([]string, error)
 	// UpsertMetricsCatalogSources records that source reported names. A
 	// (name, source) pair is inserted when new and its last_seen_at
 	// refreshed only once older than refreshBefore, so a pair confirmed
@@ -304,6 +308,8 @@ type SeriesMetadataParams struct {
 	Job       string
 	// Source keeps the metrics a metadata source reports (metrics_catalog_sources).
 	Source string
+	// Service keeps the metrics a service produces (metrics_service_index).
+	Service string
 }
 
 func NormalizeSeriesMetadataUsage(usage string) string {
@@ -326,6 +332,12 @@ type MetricJobIndexItem struct {
 	Job  string
 }
 
+type MetricServiceIndexItem struct {
+	Name    string
+	Service string
+	Job     string
+}
+
 type ListQueriesResult struct {
 	Fingerprint string    `json:"fingerprint"`
 	Duration    int64     `json:"duration"`
@@ -344,17 +356,20 @@ type RecentQueriesResult struct {
 
 // Ways AnalyzeUnusedMetrics can group the catalog.
 const (
-	UnusedAnalysisByJob       = "job"
-	UnusedAnalysisBySource    = "source"
-	UnusedAnalysisByJobSource = "job,source"
+	UnusedAnalysisByJob           = "job"
+	UnusedAnalysisBySource        = "source"
+	UnusedAnalysisByJobSource     = "job,source"
+	UnusedAnalysisByService       = "service"
+	UnusedAnalysisByServiceSource = "service,source"
 )
 
 type UnusedAnalysisParams struct {
 	// GroupBy is one of the UnusedAnalysisBy* values.
 	GroupBy string
-	// Job and Source, when set, keep only that job's / source's groups.
-	Job    string
-	Source string
+	// Job, Service and Source, when set, keep only those groups.
+	Job     string
+	Service string
+	Source  string
 	// SyncedSince leaves out catalog rows no sync has confirmed since: the
 	// summary stops refreshing those, so their usage is no longer current.
 	SyncedSince time.Time
@@ -363,8 +378,9 @@ type UnusedAnalysisParams struct {
 // UnusedAnalysisRow is one group of the unused-metrics analysis. Job or
 // Source is empty when the analysis isn't grouped by it.
 type UnusedAnalysisRow struct {
-	Job    string `json:"job,omitempty"`
-	Source string `json:"source,omitempty"`
-	Total  int    `json:"total"`
-	Unused int    `json:"unused"`
+	Job     string `json:"job,omitempty"`
+	Service string `json:"service,omitempty"`
+	Source  string `json:"source,omitempty"`
+	Total   int    `json:"total"`
+	Unused  int    `json:"unused"`
 }

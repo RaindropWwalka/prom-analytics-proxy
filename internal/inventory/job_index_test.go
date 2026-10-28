@@ -497,3 +497,39 @@ func TestProcessJob_NoMetricNamesInResult_CommitsNothing(t *testing.T) {
 	assert.Zero(t, provider.upsertCalls, "with no metric names to record, storage must not be called at all")
 	assert.Empty(t, provider.jobIndexItems)
 }
+
+func TestProcessJob_RecordsServicesFromTheSameQuery(t *testing.T) {
+	provider := &fakeProvider{}
+	api := &fakePromAPI{result: model.Vector{
+		{Metric: model.Metric{"__name__": "jvm_memory_used_bytes", "service": "billing"}},
+		{Metric: model.Metric{"__name__": "jvm_memory_used_bytes", "service": "payments"}},
+		{Metric: model.Metric{"__name__": "up"}}, // no service: indexed by job only
+	}}
+	s := &Syncer{
+		dbProvider:            provider,
+		promAPI:               api,
+		jobIndexPerJobTimeout: time.Minute,
+		serviceLabel:          "service",
+	}
+
+	require.NoError(t, s.processJob(context.Background(), "jmx", db.TimeRangeUntilNow(time.Hour), 0))
+
+	require.Len(t, api.queries, 1, "services must come from the job's own query, not extra ones")
+	assert.Equal(t, `group({job="jmx", __name__=~".+"}) by (__name__, service)`, api.queries[0])
+	assert.ElementsMatch(t, []db.MetricJobIndexItem{
+		{Name: "jvm_memory_used_bytes", Job: "jmx"}, {Name: "up", Job: "jmx"},
+	}, provider.jobIndexItems)
+	assert.ElementsMatch(t, []db.MetricServiceIndexItem{
+		{Name: "jvm_memory_used_bytes", Service: "billing", Job: "jmx"},
+		{Name: "jvm_memory_used_bytes", Service: "payments", Job: "jmx"},
+	}, provider.serviceIndexItems)
+}
+
+func TestProcessJob_WithoutServiceLabelQueriesNamesOnly(t *testing.T) {
+	api := &fakePromAPI{}
+	s := &Syncer{dbProvider: &fakeProvider{}, promAPI: api, jobIndexPerJobTimeout: time.Minute}
+
+	require.NoError(t, s.processJob(context.Background(), "node", db.TimeRangeUntilNow(time.Hour), 0))
+
+	assert.Equal(t, []string{`group({job="node", __name__=~".+"}) by (__name__)`}, api.queries)
+}
