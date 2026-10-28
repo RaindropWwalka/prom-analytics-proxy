@@ -13,6 +13,10 @@ import type { TableData } from "@/components/data-table/types";
 import { DateRange } from "@/lib/types";
 import { formatUnit } from "@/lib/utils";
 import { formatUTCtoLocal } from "@/lib/utils/date-utils";
+import {
+  QueryOrigins,
+  type QueryOriginsData,
+} from "@/components/metrics-explorer/query-origins";
 
 // Define our extended column type with maxWidth
 type ExtendedColumnDef<
@@ -28,7 +32,7 @@ interface MetricUsageProps {
 }
 
 // Define interface for expression data items
-interface ExpressionDataItem {
+interface ExpressionDataItem extends QueryOriginsData {
   query: string;
   avgDuration?: number;
   maxPeakSamples?: number;
@@ -52,6 +56,7 @@ interface MetricUsageItem {
 // Column ids the server sorts by under another name; the rest match.
 const SERVER_SORT_FIELDS: Record<string, string> = {
   query: "queryParam",
+  ts: "lastRun",
   title: "name",
 };
 
@@ -153,10 +158,10 @@ function useTabState(
 }
 
 // Define column configurations
-const getQueriesColumns = (): ExtendedColumnDef<
-  ExpressionDataItem,
-  unknown
->[] => [
+const getQueriesColumns = (origins: {
+  isOpen: (query: string) => boolean;
+  setOpen: (query: string, open: boolean) => void;
+}): ExtendedColumnDef<ExpressionDataItem, unknown>[] => [
   {
     accessorKey: "query",
     maxWidth: 600,
@@ -196,9 +201,30 @@ const getQueriesColumns = (): ExtendedColumnDef<
     },
   },
   {
+    accessorKey: "executions",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Runs" />
+    ),
+    cell: ({ row }) => (
+      <span className="tabular-nums">{row.original.executions ?? 0}</span>
+    ),
+  },
+  {
+    id: "origins",
+    header: "Origin",
+    cell: ({ row }) => (
+      <QueryOrigins
+        origins={row.original}
+        open={origins.isOpen(row.original.query)}
+        onOpenChange={(open) => origins.setOpen(row.original.query, open)}
+      />
+    ),
+  },
+  {
     accessorKey: "ts",
-    enableSorting: false,
-    header: "Last run",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Last run" />
+    ),
     cell: ({ row }) => formatTime(row.original.ts),
   },
 ];
@@ -479,7 +505,16 @@ export default function MetricUsage({
   );
 
   // Initialize column definitions
-  const queriesColumns = React.useMemo(() => getQueriesColumns(), []);
+  // The one query whose origins are open, if any.
+  const [openOrigins, setOpenOrigins] = React.useState<string | null>(null);
+  const queriesColumns = React.useMemo(
+    () =>
+      getQueriesColumns({
+        isOpen: (query) => openOrigins === query,
+        setOpen: (query, open) => setOpenOrigins(open ? query : null),
+      }),
+    [openOrigins],
+  );
   const alertsColumns = React.useMemo(() => getAlertsColumns(), []);
   const recordingColumns = React.useMemo(() => getRecordingColumns(), []);
   const dashboardColumns = React.useMemo(() => getDashboardColumns(), []);

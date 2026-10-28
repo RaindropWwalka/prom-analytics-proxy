@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/nicolastakashi/prom-analytics-proxy/api/models"
@@ -17,8 +18,22 @@ import (
 func scanQueriesBySerieName(total *int) func(*sql.Rows) (QueriesBySerieNameResult, error) {
 	return func(row *sql.Rows) (QueriesBySerieNameResult, error) {
 		var r QueriesBySerieNameResult
-		err := row.Scan(&r.Query, &r.AvgDuration, &r.AvgPeakySamples, &r.MaxPeakSamples, total)
-		return r, err
+		var dashboards, rules, clients []byte
+		err := row.Scan(&r.Query, &r.AvgDuration, &r.AvgPeakySamples, &r.MaxPeakSamples,
+			(*lenientTime)(&r.TS), &r.Executions, &r.AlertRuns, &r.DashboardRuns,
+			&dashboards, &rules, &clients, total)
+		if err != nil {
+			return r, err
+		}
+		for _, f := range []struct {
+			raw []byte
+			to  *[]string
+		}{{dashboards, &r.Dashboards}, {rules, &r.Rules}, {clients, &r.Clients}} {
+			if err := unmarshalNames(f.raw, f.to); err != nil {
+				return r, err
+			}
+		}
+		return r, nil
 	}
 }
 
@@ -158,4 +173,61 @@ func scanMetricMetadataWithUnused(row *sql.Rows) (models.MetricMetadata, error) 
 	var r metricMetadataRow
 	err := row.Scan(append(r.dest(), &r.mm.IsUnused)...)
 	return r.result(), err
+}
+
+// maxOriginNames caps how many dashboards, rules or clients a query lists.
+const maxOriginNames = 20
+
+// unmarshalNames reads a JSON array of names, dropping nulls and empties and
+// keeping at most maxOriginNames, sorted.
+func unmarshalNames(raw []byte, to *[]string) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var names []*string
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return fmt.Errorf("unmarshal names: %w", err)
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n != nil && *n != "" {
+			out = append(out, *n)
+		}
+	}
+	slices.Sort(out)
+	out = slices.Compact(out)
+	if len(out) > maxOriginNames {
+		out = out[:maxOriginNames]
+	}
+	if len(out) > 0 {
+		*to = out
+	}
+	return nil
+}
+
+// lenientTime scans a timestamp that SQLite hands back as text once an
+// aggregate such as MAX() has dropped the column's type.
+type lenientTime time.Time
+
+func (l *lenientTime) Scan(src any) error {
+	switch v := src.(type) {
+	case nil:
+		return nil
+	case time.Time:
+		*l = lenientTime(v.UTC())
+		return nil
+	case string:
+		// What the SQLite driver writes a time.Time as (time.Time.String),
+		// then the other forms timestamps take.
+		layouts := []string{"2006-01-02 15:04:05.999999999 -0700 MST", time.RFC3339Nano, "2006-01-02 15:04:05.999999999-07:00", SQLiteTimeFormat}
+		for _, layout := range layouts {
+			if t, err := time.Parse(layout, v); err == nil {
+				*l = lenientTime(t.UTC())
+				return nil
+			}
+		}
+		return fmt.Errorf("time: can't parse %q", v)
+	default:
+		return fmt.Errorf("time: unsupported type %T", src)
+	}
 }

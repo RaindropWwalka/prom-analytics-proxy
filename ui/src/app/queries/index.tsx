@@ -45,7 +45,7 @@ const columns: ExtendedColumnDef<QueryExpression>[] = [
     ),
     cell: ({ row }) => {
       const value = Number(row.getValue("executions"));
-      return <div className="text-right">{value.toLocaleString()}</div>;
+      return <div className="tabular-nums">{value.toLocaleString()}</div>;
     },
   },
   {
@@ -55,7 +55,7 @@ const columns: ExtendedColumnDef<QueryExpression>[] = [
     ),
     cell: ({ row }) => {
       const value = Number(row.getValue("avgDuration"));
-      return <div className="text-right">{value}ms</div>;
+      return <div className="tabular-nums">{value}ms</div>;
     },
   },
   {
@@ -65,7 +65,7 @@ const columns: ExtendedColumnDef<QueryExpression>[] = [
     ),
     cell: ({ row }) => {
       const value = Number(row.getValue("errorRatePercent"));
-      return <div className="text-right">{value}%</div>;
+      return <div className="tabular-nums">{value}%</div>;
     },
   },
   {
@@ -75,7 +75,7 @@ const columns: ExtendedColumnDef<QueryExpression>[] = [
     ),
     cell: ({ row }) => {
       const value = Number(row.getValue("peakSamples"));
-      return <div className="text-right">{formatUnit(value)}</div>;
+      return <div className="tabular-nums">{formatUnit(value)}</div>;
     },
   },
 ];

@@ -68,7 +68,18 @@ type QueriesBySerieNameResult struct {
 	AvgPeakySamples float64           `json:"avgPeakySamples"`
 	MaxPeakSamples  int               `json:"maxPeakSamples"`
 	HTTPHeaders     map[string]string `json:"httpHeaders"`
-	TS              time.Time         `json:"ts"`
+	// TS is when the query last ran in the range.
+	TS time.Time `json:"ts"`
+	// Executions splits into DashboardRuns (a Grafana panel), AlertRuns
+	// (Grafana alerting) and the rest, by the headers stored with each run.
+	Executions    int `json:"executions"`
+	DashboardRuns int `json:"dashboardRuns"`
+	AlertRuns     int `json:"alertRuns"`
+	// Which dashboards (by title, else uid), alert rules and other clients
+	// (X-Client-Name, else User-Agent) ran it.
+	Dashboards []string `json:"dashboards,omitempty"`
+	Rules      []string `json:"rules,omitempty"`
+	Clients    []string `json:"clients,omitempty"`
 }
 
 type QueryStatusDistributionResult struct {

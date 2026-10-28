@@ -1554,11 +1554,34 @@ const docTemplate = `{
         "db.QueriesBySerieNameResult": {
             "type": "object",
             "properties": {
+                "alertRuns": {
+                    "type": "integer"
+                },
                 "avgDuration": {
                     "type": "number"
                 },
                 "avgPeakySamples": {
                     "type": "number"
+                },
+                "clients": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "dashboardRuns": {
+                    "type": "integer"
+                },
+                "dashboards": {
+                    "description": "Which dashboards (by title, else uid), alert rules and other clients\n(X-Client-Name, else User-Agent) ran it.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "executions": {
+                    "description": "Executions splits into DashboardRuns (a Grafana panel), AlertRuns\n(Grafana alerting) and the rest, by the headers stored with each run.",
+                    "type": "integer"
                 },
                 "httpHeaders": {
                     "type": "object",
@@ -1572,7 +1595,14 @@ const docTemplate = `{
                 "query": {
                     "type": "string"
                 },
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "ts": {
+                    "description": "TS is when the query last ran in the range.",
                     "type": "string"
                 }
             }

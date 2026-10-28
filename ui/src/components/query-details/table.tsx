@@ -77,7 +77,7 @@ const buildColumns = (
 ): ExtendedColumnDef<QueryExecution>[] => [
   {
     accessorKey: "timestamp",
-    size: 150,
+    size: 170,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Timestamp" />
     ),
@@ -101,7 +101,7 @@ const buildColumns = (
   },
   {
     accessorKey: "type",
-    size: 90,
+    size: 110,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Type" />
     ),
@@ -113,7 +113,7 @@ const buildColumns = (
   },
   {
     accessorKey: "status",
-    size: 80,
+    size: 105,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Status" />
     ),
@@ -135,7 +135,7 @@ const buildColumns = (
   },
   {
     accessorKey: "duration",
-    size: 90,
+    size: 115,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Duration" />
     ),
@@ -143,22 +143,22 @@ const buildColumns = (
   },
   {
     accessorKey: "samples",
-    size: 90,
+    size: 115,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Samples" />
     ),
     cell: ({ row }) => {
       const v = Number(row.getValue("samples"));
       return (
-        <div className="text-right">
+        <span className="tabular-nums">
           {Number.isFinite(v) ? formatUnit(v) : "-"}
-        </div>
+        </span>
       );
     },
   },
   {
     accessorKey: "timeRange",
-    size: 110,
+    size: 135,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Time Range" />
     ),
@@ -230,21 +230,21 @@ const buildColumns = (
   },
   {
     accessorKey: "steps",
-    size: 70,
+    size: 95,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Steps" />
     ),
     cell: ({ row }) => String(row.getValue("steps")),
   },
   {
+    // No fixed width: takes what the other columns leave.
     id: "origin",
-    size: 280,
     header: "Origin",
     cell: ({ row }) => <ExecutionOrigin headers={row.original.httpHeaders} />,
   },
   {
     id: "headers",
-    size: 100,
+    size: 115,
     header: "Headers",
     cell: ({ row }) => (
       <HeadersPopover
