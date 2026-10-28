@@ -941,10 +941,18 @@ func (p *benchDBProvider) AnalyzeUnusedMetrics(ctx context.Context, params db.Un
 	return nil, nil
 }
 
-func (p *benchDBProvider) UpsertMetricsServiceIndex(ctx context.Context, items []db.MetricServiceIndexItem) error {
+func (p *benchDBProvider) UpsertMetricsServiceIndex(ctx context.Context, items []db.MetricServiceIndexItem, refreshBefore time.Time) error {
 	return nil
 }
 
 func (p *benchDBProvider) ListServices(ctx context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (p *benchDBProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int, refreshBefore time.Time) error {
+	return nil
+}
+
+func (p *benchDBProvider) GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error) {
 	return nil, nil
 }

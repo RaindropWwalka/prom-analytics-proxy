@@ -37,8 +37,11 @@ type Provider interface {
 	UpsertMetricsJobIndex(ctx context.Context, items []MetricJobIndexItem) error
 	ListJobs(ctx context.Context) ([]string, error)
 	// UpsertMetricsServiceIndex records which service of which job produces
-	// each metric.
-	UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem) error
+	// each metric. A pair is inserted when new and refreshed only once its
+	// last confirmation is older than refreshBefore, so a steady state - one
+	// shared exporter's job can carry tens of thousands of pairs - rewrites
+	// almost nothing.
+	UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem, refreshBefore time.Time) error
 	ListServices(ctx context.Context) ([]string, error)
 	// UpsertMetricsCatalogSources records that source reported names. A
 	// (name, source) pair is inserted when new and its last_seen_at
@@ -52,6 +55,16 @@ type Provider interface {
 	// that report it, sorted. Names no source reports are absent.
 	GetMetricsCatalogSources(ctx context.Context, names []string) (map[string][]string, error)
 	ListMetricsCatalogSources(ctx context.Context) ([]string, error)
+	// ReplaceMetricsCardinality makes series the whole of what's known about
+	// source's cardinality: metrics missing from it are dropped. A metric's
+	// row is only rewritten when new, off by more than a tenth, or last
+	// written before refreshBefore - a source can report tens of thousands
+	// of metrics whose series barely move between syncs.
+	ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int, refreshBefore time.Time) error
+	// GetMetricsCardinality returns, for each of names, its series count per
+	// source. A name no source counted falls back to its series summed over
+	// the job index, under UpstreamSeriesSource; names neither knows are absent.
+	GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error)
 	// AnalyzeUnusedMetrics counts, per job and/or source, the catalog's
 	// metrics and how many of them are unused.
 	AnalyzeUnusedMetrics(ctx context.Context, params UnusedAnalysisParams) ([]UnusedAnalysisRow, error)
@@ -330,6 +343,9 @@ type MetricCatalogItem struct {
 type MetricJobIndexItem struct {
 	Name string
 	Job  string
+	// Series is how many series of Name the job has; 0 when unknown, stored
+	// as NULL.
+	Series int64
 }
 
 type MetricServiceIndexItem struct {
@@ -356,11 +372,13 @@ type RecentQueriesResult struct {
 
 // Ways AnalyzeUnusedMetrics can group the catalog.
 const (
-	UnusedAnalysisByJob           = "job"
-	UnusedAnalysisBySource        = "source"
-	UnusedAnalysisByJobSource     = "job,source"
-	UnusedAnalysisByService       = "service"
-	UnusedAnalysisByServiceSource = "service,source"
+	UnusedAnalysisByJob              = "job"
+	UnusedAnalysisBySource           = "source"
+	UnusedAnalysisByJobSource        = "job,source"
+	UnusedAnalysisByService          = "service"
+	UnusedAnalysisByServiceSource    = "service,source"
+	UnusedAnalysisByJobService       = "job,service"
+	UnusedAnalysisByJobServiceSource = "job,service,source"
 )
 
 type UnusedAnalysisParams struct {
@@ -383,4 +401,8 @@ type UnusedAnalysisRow struct {
 	Source  string `json:"source,omitempty"`
 	Total   int    `json:"total"`
 	Unused  int    `json:"unused"`
+	// Series and UnusedSeries are the group's head series, all and of its
+	// unused metrics (see metrics_cardinality).
+	Series       int `json:"series"`
+	UnusedSeries int `json:"unusedSeries"`
 }

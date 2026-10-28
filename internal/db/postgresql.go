@@ -1291,9 +1291,10 @@ func (p *PostGreSQLProvider) UpsertMetricsJobIndex(ctx context.Context, items []
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO metrics_job_index(name, job, updated_at)
-		VALUES ($1, $2, NOW())
+		INSERT INTO metrics_job_index(name, job, series, updated_at)
+		VALUES ($1, $2, $3, NOW())
 		ON CONFLICT(name, job) DO UPDATE SET
+		  series = EXCLUDED.series,
 		  updated_at = EXCLUDED.updated_at
 	`)
 	if err != nil {
@@ -1302,7 +1303,7 @@ func (p *PostGreSQLProvider) UpsertMetricsJobIndex(ctx context.Context, items []
 	}
 	defer CloseResource(stmt)
 	for _, it := range sorted {
-		if _, err := stmt.ExecContext(ctx, it.Name, it.Job); err != nil {
+		if _, err := stmt.ExecContext(ctx, it.Name, it.Job, nullSeries(it.Series)); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("exec: %w", err)
 		}
@@ -1339,6 +1340,63 @@ func (p *PostGreSQLProvider) UpsertMetricsCatalogSources(ctx context.Context, so
 	return nil
 }
 
+func (p *PostGreSQLProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int, refreshBefore time.Time) error {
+	names, counts := cardinalityArrays(series)
+	refresh := refreshBefore.UTC().Format(ISOTimeFormat)
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+        DELETE FROM metrics_cardinality
+        WHERE source = $1 AND NOT (name = ANY($2::text[]))
+    `, source, pq.Array(names)); err != nil {
+		return fmt.Errorf("drop stale cardinality: %w", err)
+	}
+	// Rows still close to the new count and recently written are filtered
+	// out before the INSERT, so they aren't touched at all.
+	for start := 0; start < len(names); start += cardinalityChunk {
+		end := min(start+cardinalityChunk, len(names))
+		if _, err := tx.ExecContext(ctx, `
+            INSERT INTO metrics_cardinality(name, source, series, updated_at)
+            SELECT n, $1, c, NOW() AT TIME ZONE 'UTC'
+            FROM unnest($2::text[], $3::bigint[]) AS x(n, c)
+            WHERE NOT EXISTS (
+                SELECT 1 FROM metrics_cardinality k
+                WHERE k.name = n AND k.source = $1
+                  AND k.updated_at >= $4
+                  AND abs(k.series - c) * 10 <= k.series
+            )
+            ON CONFLICT(name, source) DO UPDATE SET
+              series = EXCLUDED.series,
+              updated_at = EXCLUDED.updated_at
+        `, source, pq.Array(names[start:end]), pq.Array(counts[start:end]), refresh); err != nil {
+			return fmt.Errorf("upsert cardinality: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (p *PostGreSQLProvider) GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error) {
+	if len(names) == 0 {
+		return map[string]map[string]int{}, nil
+	}
+	rows, err := ExecuteQuery(ctx, p.db, `
+        SELECT name, source, series FROM metrics_cardinality
+        WHERE name = ANY($1::text[])
+        UNION ALL
+        SELECT j.name, $2::text, SUM(j.series)::bigint FROM metrics_job_index j
+        WHERE j.name = ANY($1::text[]) AND j.series IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM metrics_cardinality k WHERE k.name = j.name)
+        GROUP BY j.name
+    `, pq.Array(names), UpstreamSeriesSource)
+	if err != nil {
+		return nil, err
+	}
+	return groupCardinality(rows)
+}
+
 func (p *PostGreSQLProvider) DeleteMetricsCatalogSourcesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	res, err := p.db.ExecContext(ctx, `DELETE FROM metrics_catalog_sources WHERE last_seen_at < $1`, cutoff.UTC().Format(ISOTimeFormat))
 	if err != nil {
@@ -1370,27 +1428,35 @@ func (p *PostGreSQLProvider) ListMetricsCatalogSources(ctx context.Context) ([]s
 	return ScanRows(rows, scanJob)
 }
 
-func (p *PostGreSQLProvider) UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem) error {
+func (p *PostGreSQLProvider) UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem, refreshBefore time.Time) error {
 	items = sortedUniqueServiceItems(items)
-	if len(items) == 0 {
-		return nil
-	}
-	names := make([]string, len(items))
-	services := make([]string, len(items))
-	jobs := make([]string, len(items))
-	for i, it := range items {
-		names[i], services[i], jobs[i] = it.Name, it.Service, it.Job
-	}
-	// One statement for the whole job, like UpsertMetricsCatalog: a shared
-	// exporter's job can carry thousands of (metric, service) pairs.
-	if _, err := p.db.ExecContext(ctx, `
-        INSERT INTO metrics_service_index(name, service, job, updated_at)
-        SELECT n, s, j, NOW()
-        FROM unnest($1::text[], $2::text[], $3::text[]) AS x(n, s, j)
-        ON CONFLICT(name, service, job) DO UPDATE SET
-          updated_at = EXCLUDED.updated_at
-    `, pq.Array(names), pq.Array(services), pq.Array(jobs)); err != nil {
-		return fmt.Errorf("upsert service index: %w", err)
+	refresh := refreshBefore.UTC().Format(ISOTimeFormat)
+	// In chunks, each its own short statement: a single statement over a
+	// whole shared exporter's job holds its locks, and its round trip, for
+	// as long as the slowest row takes. A pair confirmed since refreshBefore
+	// is filtered out before the INSERT rather than skipped by a conditional
+	// DO UPDATE, which would still lock - that is, write - the row.
+	for start := 0; start < len(items); start += serviceIndexChunk {
+		chunk := items[start:min(start+serviceIndexChunk, len(items))]
+		names := make([]string, len(chunk))
+		services := make([]string, len(chunk))
+		jobs := make([]string, len(chunk))
+		for i, it := range chunk {
+			names[i], services[i], jobs[i] = it.Name, it.Service, it.Job
+		}
+		if _, err := p.db.ExecContext(ctx, `
+            INSERT INTO metrics_service_index(name, service, job, updated_at)
+            SELECT n, s, j, NOW() AT TIME ZONE 'UTC'
+            FROM unnest($1::text[], $2::text[], $3::text[]) AS x(n, s, j)
+            WHERE NOT EXISTS (
+                SELECT 1 FROM metrics_service_index i
+                WHERE i.name = n AND i.service = s AND i.job = j AND i.updated_at >= $4
+            )
+            ON CONFLICT(name, service, job) DO UPDATE SET
+              updated_at = EXCLUDED.updated_at
+        `, pq.Array(names), pq.Array(services), pq.Array(jobs), refresh); err != nil {
+			return fmt.Errorf("upsert service index: %w", err)
+		}
 	}
 	return nil
 }

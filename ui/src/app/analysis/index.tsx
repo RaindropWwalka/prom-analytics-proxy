@@ -15,10 +15,14 @@ import {
 import { Play } from "lucide-react";
 import {
   analyzeUnused,
+  getProducers,
+  getServices,
+  getSources,
   type UnusedAnalysisGroupBy,
   type UnusedAnalysisRow,
 } from "@/api/metrics";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
@@ -35,22 +39,49 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DataTable, DataTableColumnHeader } from "@/components/data-table";
+import { formatUnit } from "@/lib/utils";
 import {
   catalogLink,
+  DIMENSIONS,
+  filterRows,
+  hasFilters,
+  NO_FILTERS,
+  type AnalysisFilters,
+  dimensionTitle,
+  groupByOf,
   groupLabel,
-  groupTitle,
+  type Dimension,
   totals,
   unusedPercent,
 } from "./analysis-utils";
 
+// Why a dimension has nothing to group by.
+const UNAVAILABLE: Record<Dimension, string> = {
+  job: "The job index isn't built yet: it fills in at the end of an inventory sync with inventory.job_sync_enabled.",
+  service:
+    "The service index isn't built yet: it fills in with the job index when inventory.service_label is set.",
+  source:
+    "No metadata source has reported metrics yet (inventory.metadata_sources).",
+};
+
 // How many groups the chart shows; the table has them all.
 const CHART_GROUPS = 15;
 
-type Row = UnusedAnalysisRow & { label: string; used: number; pct: number };
+type Row = UnusedAnalysisRow & {
+  label: string;
+  used: number;
+  usedSeries: number;
+  pct: number;
+};
+
+type Measure = "metrics" | "series";
 
 export default function AnalysisPage() {
   const [, setLocation] = useLocation();
-  const [groupBy, setGroupBy] = useState<UnusedAnalysisGroupBy>("job");
+  const [dims, setDims] = useState<Dimension[]>(["job"]);
+  const groupBy = groupByOf(dims);
+  // What the chart ranks groups by: unused metrics, or the series they hold.
+  const [measure, setMeasure] = useState<Measure>("series");
   // The analysis aggregates the whole catalog, so it runs when asked to,
   // not on every visit.
   const [requested, setRequested] = useState<UnusedAnalysisGroupBy | null>(
@@ -64,6 +95,7 @@ export default function AnalysisPage() {
   });
 
   const run = () => {
+    if (!groupBy) return;
     if (requested === groupBy) {
       void refetch();
     } else {
@@ -71,35 +103,84 @@ export default function AnalysisPage() {
     }
   };
 
-  const shownGroupBy = requested ?? groupBy;
+  // How many values each dimension has: 0 means its index isn't built
+  // (yet), so grouping by it can only come back empty.
+  const { data: jobs } = useQuery({
+    queryKey: ["producers"],
+    queryFn: getProducers,
+  });
+  const { data: services } = useQuery({
+    queryKey: ["services"],
+    queryFn: getServices,
+  });
+  const { data: sources } = useQuery({
+    queryKey: ["sources"],
+    queryFn: getSources,
+  });
+  const available: Record<Dimension, number | undefined> = {
+    job: jobs?.length,
+    service: services?.length,
+    source: sources?.length,
+  };
+
+  const toggle = (d: Dimension) =>
+    setDims((prev) =>
+      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d],
+    );
+
+  const shownGroupBy = requested ?? groupBy ?? "job";
   const rows: Row[] = useMemo(
     () =>
       (data ?? []).map((r) => ({
         ...r,
         label: groupLabel(r, shownGroupBy),
         used: r.total - r.unused,
+        usedSeries: r.series - r.unusedSeries,
         pct: unusedPercent(r),
       })),
     [data, shownGroupBy],
   );
-  const sum = totals(rows);
+  const [filters, setFilters] = useState<AnalysisFilters>(NO_FILTERS);
+  const setFilter = (key: keyof AnalysisFilters, value: string) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  const shownDims = DIMENSIONS.filter((d) => shownGroupBy.includes(d));
+  // Table, chart and totals all follow the filters.
+  const filtered = useMemo(() => filterRows(rows, filters), [rows, filters]);
+
+  const chartRows = useMemo(
+    () =>
+      [...filtered].sort((a, b) =>
+        measure === "series"
+          ? b.unusedSeries - a.unusedSeries
+          : b.unused - a.unused,
+      ),
+    [filtered, measure],
+  );
+  const hasSeries = rows.some((r) => r.series > 0);
+  const sum = totals(filtered);
+  const seriesSum = filtered.reduce(
+    (acc, r) => ({
+      series: acc.series + r.series,
+      unused: acc.unused + r.unusedSeries,
+    }),
+    { series: 0, unused: 0 },
+  );
 
   const columns: LegacyColumnDef<Row>[] = [
-    {
-      accessorKey: "label",
-      size: 320,
+    ...shownDims.map((d): LegacyColumnDef<Row> => ({
+      accessorKey: d,
       header: ({ column }) => (
-        <DataTableColumnHeader
-          column={column}
-          title={groupTitle(shownGroupBy)}
-        />
+        <DataTableColumnHeader column={column} title={dimensionTitle(d)} />
       ),
       cell: ({ row }) => (
-        <span className="block truncate font-medium" title={row.original.label}>
-          {row.original.label}
+        <span
+          className="block truncate font-medium"
+          title={row.original[d] || undefined}
+        >
+          {row.original[d] || "—"}
         </span>
       ),
-    },
+    })),
     {
       accessorKey: "total",
       size: 110,
@@ -118,6 +199,28 @@ export default function AnalysisPage() {
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">{row.original.unused}</span>
+      ),
+    },
+    {
+      accessorKey: "series",
+      size: 110,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title="Series" />
+      ),
+      cell: ({ row }) => (
+        <span className="tabular-nums">{formatUnit(row.original.series)}</span>
+      ),
+    },
+    {
+      accessorKey: "unusedSeries",
+      size: 130,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title="Unused series" />
+      ),
+      cell: ({ row }) => (
+        <span className="tabular-nums">
+          {formatUnit(row.original.unusedSeries)}
+        </span>
       ),
     },
     {
@@ -147,29 +250,61 @@ export default function AnalysisPage() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <Select
-          value={groupBy}
-          onValueChange={(v) => setGroupBy(v as UnusedAnalysisGroupBy)}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <fieldset className="rounded-md border px-3 pb-2 pt-1">
+          <legend className="px-1 text-xs text-muted-foreground">
+            Group rows by
+          </legend>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {DIMENSIONS.map((d) => {
+              const count = available[d];
+              const disabled = count === 0;
+              return (
+                <label
+                  key={d}
+                  className={`flex items-center gap-2 text-sm ${
+                    disabled
+                      ? "cursor-not-allowed text-muted-foreground"
+                      : "cursor-pointer"
+                  }`}
+                  title={disabled ? UNAVAILABLE[d] : undefined}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-primary"
+                    checked={dims.includes(d)}
+                    disabled={disabled}
+                    onChange={() => toggle(d)}
+                  />
+                  {dimensionTitle(d)}
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {count === undefined ? "…" : count}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+        <Button
+          onClick={run}
+          disabled={isFetching || !groupBy}
+          title={groupBy ? undefined : "Pick at least one dimension"}
+          className="cursor-pointer"
         >
-          <SelectTrigger className="sm:w-[200px]" aria-label="Group by">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="job">By job</SelectItem>
-            <SelectItem value="service">By service</SelectItem>
-            <SelectItem value="source">By source</SelectItem>
-            <SelectItem value="job,source">By job and source</SelectItem>
-            <SelectItem value="service,source">
-              By service and source
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <Button onClick={run} disabled={isFetching} className="cursor-pointer">
           <Play className="h-4 w-4" />
           {isFetching ? "Analyzing…" : "Run analysis"}
         </Button>
       </div>
+
+      <p className="-mt-2 text-xs text-muted-foreground">
+        {groupBy
+          ? `One row per ${dims.length > 1 ? "combination of " : ""}${DIMENSIONS.filter(
+              (d) => dims.includes(d),
+            )
+              .map((d) => dimensionTitle(d).toLowerCase())
+              .join(" + ")}.`
+          : "Pick at least one dimension."}
+      </p>
 
       {error && (
         <p className="text-sm text-destructive">{(error as Error).message}</p>
@@ -177,30 +312,66 @@ export default function AnalysisPage() {
 
       {data && rows.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          Nothing to analyze. Grouping by job or service needs the job index
-          (inventory.job_sync_enabled, with inventory.service_label for
-          services), and by source needs inventory.metadata_sources.
+          Nothing to analyze yet.{" "}
+          {DIMENSIONS.filter(
+            (d) => (requested ?? "").includes(d) && available[d] === 0,
+          )
+            .map((d) => UNAVAILABLE[d])
+            .join(" ") ||
+            "No metric has been synced within the inventory time window."}
         </p>
       )}
 
       {rows.length > 0 && (
         <>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryCard title="Metrics" value={sum.total} />
-            <SummaryCard title="Unused" value={sum.unused} />
+            <SummaryCard title="Unused metrics" value={sum.unused} />
             <SummaryCard
               title="Unused share"
               value={`${sum.total > 0 ? Math.round((sum.unused / sum.total) * 100) : 0}%`}
+            />
+            <SummaryCard
+              title="Unused series"
+              value={
+                hasSeries
+                  ? `${formatUnit(seriesSum.unused)} / ${formatUnit(seriesSum.series)}`
+                  : "—"
+              }
             />
           </div>
 
           <Card>
             <CardHeader>
-              <CardTitle>Most unused metrics</CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle>
+                  {measure === "series"
+                    ? "Most series in unused metrics"
+                    : "Most unused metrics"}
+                </CardTitle>
+                <Select
+                  value={measure}
+                  onValueChange={(v) => setMeasure(v as Measure)}
+                >
+                  <SelectTrigger className="w-[160px]" aria-label="Measure">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="series">By series</SelectItem>
+                    <SelectItem value="metrics">By metrics</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <CardDescription>
-                Top {Math.min(CHART_GROUPS, rows.length)} groups by unused
-                metrics.
-                {shownGroupBy.endsWith(",source") &&
+                Top {Math.min(CHART_GROUPS, rows.length)} groups by unused{" "}
+                {measure}.
+                {measure === "series" &&
+                  !hasSeries &&
+                  " No series recorded yet: needs inventory.cardinality_limit and metadata_sources."}
+                {measure === "series" &&
+                  hasSeries &&
+                  " Series are each source's head series; a metric shared by several groups counts under each."}
+                {shownGroupBy.includes(",source") &&
                   " A metric counts under every source reporting it."}
               </CardDescription>
             </CardHeader>
@@ -210,7 +381,7 @@ export default function AnalysisPage() {
                 height={Math.max(200, Math.min(CHART_GROUPS, rows.length) * 32)}
               >
                 <BarChart
-                  data={rows.slice(0, CHART_GROUPS)}
+                  data={chartRows.slice(0, CHART_GROUPS)}
                   layout="vertical"
                   margin={{ left: 8, right: 16 }}
                 >
@@ -228,13 +399,13 @@ export default function AnalysisPage() {
                   <Tooltip />
                   <Legend />
                   <Bar
-                    dataKey="unused"
+                    dataKey={measure === "series" ? "unusedSeries" : "unused"}
                     name="Unused"
                     stackId="metrics"
                     fill="var(--chart-1)"
                   />
                   <Bar
-                    dataKey="used"
+                    dataKey={measure === "series" ? "usedSeries" : "used"}
                     name="Used"
                     stackId="metrics"
                     fill="var(--chart-3)"
@@ -244,14 +415,64 @@ export default function AnalysisPage() {
             </CardContent>
           </Card>
 
-          <DataTable<Row>
-            data={rows}
-            columns={columns}
-            pagination={true}
-            pageSize={20}
-            searchColumn="label"
-            onRowClick={(row) => setLocation(catalogLink(row))}
-          />
+          <Card>
+            <CardContent className="pt-6">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">
+                  {filtered.length === rows.length
+                    ? `${rows.length} groups`
+                    : `${filtered.length} of ${rows.length} groups`}
+                </span>
+                {hasFilters(filters) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setFilters(NO_FILTERS)}
+                    className="cursor-pointer"
+                  >
+                    Reset filters
+                  </Button>
+                )}
+              </div>
+              <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+                {shownDims.map((d) => (
+                  <Input
+                    key={d}
+                    aria-label={`Filter ${dimensionTitle(d)}`}
+                    placeholder={`${dimensionTitle(d)} contains…`}
+                    value={filters[d]}
+                    onChange={(e) => setFilter(d, e.target.value)}
+                  />
+                ))}
+                {(
+                  [
+                    ["minTotal", "Metrics ≥"],
+                    ["minUnused", "Unused ≥"],
+                    ["minSeries", "Series ≥"],
+                    ["minUnusedSeries", "Unused series ≥"],
+                    ["minPct", "Unused % ≥"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Input
+                    key={key}
+                    type="number"
+                    min={0}
+                    aria-label={label}
+                    placeholder={label}
+                    value={filters[key]}
+                    onChange={(e) => setFilter(key, e.target.value)}
+                  />
+                ))}
+              </div>
+              <DataTable<Row>
+                data={filtered}
+                columns={columns}
+                pagination={true}
+                pageSize={20}
+                onRowClick={(row) => setLocation(catalogLink(row))}
+              />
+            </CardContent>
+          </Card>
         </>
       )}
     </div>

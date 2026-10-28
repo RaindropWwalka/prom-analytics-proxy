@@ -86,6 +86,8 @@ export interface MetricMetadata {
   // Inventory metadata sources reporting this metric; absent when the
   // catalog is read from the upstream.
   sources?: string[];
+  // Head series per metadata source, for sources whose top-N it is in.
+  series?: Record<string, number>;
 }
 
 export interface Producer {

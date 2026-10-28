@@ -340,8 +340,15 @@ export async function getSources(): Promise<string[]> {
   return body.data || [];
 }
 
+// Any non-empty combination of job, service and source, in that order.
 export type UnusedAnalysisGroupBy =
-  "job" | "service" | "source" | "job,source" | "service,source";
+  | "job"
+  | "service"
+  | "source"
+  | "job,service"
+  | "job,source"
+  | "service,source"
+  | "job,service,source";
 
 export interface UnusedAnalysisRow {
   job?: string;
@@ -349,6 +356,8 @@ export interface UnusedAnalysisRow {
   source?: string;
   total: number;
   unused: number;
+  series: number;
+  unusedSeries: number;
 }
 
 // analyzeUnused counts the catalog's metrics and how many are unused, per

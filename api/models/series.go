@@ -25,4 +25,7 @@ type MetricMetadata struct {
 	// Sources are the inventory.metadata_sources that report this metric,
 	// sorted. Empty when the catalog is read from the upstream.
 	Sources []string `json:"sources,omitempty"`
+	// Series is the metric's head series per metadata source, for the
+	// sources whose recorded top-N (inventory.cardinality_limit) it is in.
+	Series map[string]int `json:"series,omitempty"`
 }

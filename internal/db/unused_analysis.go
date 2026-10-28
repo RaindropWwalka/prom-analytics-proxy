@@ -10,121 +10,229 @@ import (
 // backend. Rows whose last sync is older than SyncedSince are left out:
 // the summary no longer refreshes them, so their usage isn't current.
 //
-// Job comes from metrics_job_index and source from metrics_catalog_sources,
-// neither of which knows the other: a metric of job "api" reported by two
-// sources counts under both (api, source) pairs, even if only one of them
-// scrapes that job.
+// Job comes from metrics_job_index, service from metrics_service_index and
+// source from metrics_catalog_sources, none of which knows the others: a
+// metric of job "api" reported by two sources counts under both (api,
+// source) pairs, even if only one of them scrapes that job. A metric a
+// service produces under several jobs counts once per service.
+//
+// Series come from metrics_cardinality: per (metric, source) when grouped by
+// source, else the metric's series summed over sources (metricSeriesSQL). A
+// metric outside every source's recorded top-N falls back to its series
+// summed over the job index, counted in the upstream; grouped by source it counts
+// as 0. Grouped by job alone, each job takes its own series of the metric
+// from the job index; otherwise a metric shared by several jobs or services
+// counts its whole series under each of them.
 const (
+	metricSeriesSQL = `
+        SELECT name, SUM(series) AS series FROM (
+          SELECT name, series FROM metrics_cardinality
+          UNION ALL
+          SELECT j.name, j.series FROM metrics_job_index j
+          WHERE j.series IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM metrics_cardinality mc WHERE mc.name = j.name)
+        ) t GROUP BY name`
+
 	pgUnusedByJobSQL = `
         SELECT j.job, '' AS service, '' AS source, COUNT(*),
-               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END)
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(COALESCE(j.series, k.series)), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN COALESCE(j.series, k.series) ELSE 0 END), 0)
         FROM metrics_job_index j
         JOIN metrics_catalog c ON c.name = j.name
         JOIN metrics_usage_summary s ON s.name = j.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
         WHERE c.last_synced_at >= $1
           AND ($2 = '' OR j.job = $2)
         GROUP BY j.job
         ORDER BY 5 DESC, 1`
 	pgUnusedBySourceSQL = `
         SELECT '' AS job, '' AS service, src.source, COUNT(*),
-               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END)
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
         FROM metrics_catalog_sources src
         JOIN metrics_catalog c ON c.name = src.name
         JOIN metrics_usage_summary s ON s.name = src.name
+        LEFT JOIN metrics_cardinality k ON k.name = src.name AND k.source = src.source
         WHERE c.last_synced_at >= $1
           AND ($2 = '' OR src.source = $2)
         GROUP BY src.source
         ORDER BY 5 DESC, 3`
 	pgUnusedByJobSourceSQL = `
         SELECT j.job, '' AS service, src.source, COUNT(*),
-               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END)
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
         FROM metrics_job_index j
         JOIN metrics_catalog_sources src ON src.name = j.name
         JOIN metrics_catalog c ON c.name = j.name
         JOIN metrics_usage_summary s ON s.name = j.name
+        LEFT JOIN metrics_cardinality k ON k.name = src.name AND k.source = src.source
         WHERE c.last_synced_at >= $1
           AND ($2 = '' OR j.job = $2)
           AND ($3 = '' OR src.source = $3)
         GROUP BY j.job, src.source
         ORDER BY 5 DESC, 1, 3`
-
-	sqliteUnusedByJobSQL = `
-        SELECT j.job, '' AS service, '' AS source, COUNT(*),
-               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END)
-        FROM metrics_job_index j
-        JOIN metrics_catalog c ON c.name = j.name
-        JOIN metrics_usage_summary s ON s.name = j.name
-        WHERE c.last_synced_at >= ?
-          AND (? = '' OR j.job = ?)
-        GROUP BY j.job
-        ORDER BY 5 DESC, 1`
-	sqliteUnusedBySourceSQL = `
-        SELECT '' AS job, '' AS service, src.source, COUNT(*),
-               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END)
-        FROM metrics_catalog_sources src
-        JOIN metrics_catalog c ON c.name = src.name
-        JOIN metrics_usage_summary s ON s.name = src.name
-        WHERE c.last_synced_at >= ?
-          AND (? = '' OR src.source = ?)
-        GROUP BY src.source
-        ORDER BY 5 DESC, 3`
-	sqliteUnusedByJobSourceSQL = `
-        SELECT j.job, '' AS service, src.source, COUNT(*),
-               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END)
-        FROM metrics_job_index j
-        JOIN metrics_catalog_sources src ON src.name = j.name
-        JOIN metrics_catalog c ON c.name = j.name
-        JOIN metrics_usage_summary s ON s.name = j.name
-        WHERE c.last_synced_at >= ?
-          AND (? = '' OR j.job = ?)
-          AND (? = '' OR src.source = ?)
-        GROUP BY j.job, src.source
-        ORDER BY 5 DESC, 1, 3`
-	// A metric a service produces under several jobs counts once per service.
 	pgUnusedByServiceSQL = `
         SELECT '' AS job, svc.service, '' AS source, COUNT(*),
-               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END)
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
         FROM (SELECT DISTINCT name, service FROM metrics_service_index) svc
         JOIN metrics_catalog c ON c.name = svc.name
         JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
         WHERE c.last_synced_at >= $1
           AND ($2 = '' OR svc.service = $2)
         GROUP BY svc.service
         ORDER BY 5 DESC, 2`
 	pgUnusedByServiceSourceSQL = `
         SELECT '' AS job, svc.service, src.source, COUNT(*),
-               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END)
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
         FROM (SELECT DISTINCT name, service FROM metrics_service_index) svc
         JOIN metrics_catalog_sources src ON src.name = svc.name
         JOIN metrics_catalog c ON c.name = svc.name
         JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN metrics_cardinality k ON k.name = src.name AND k.source = src.source
         WHERE c.last_synced_at >= $1
           AND ($2 = '' OR svc.service = $2)
           AND ($3 = '' OR src.source = $3)
         GROUP BY svc.service, src.source
         ORDER BY 5 DESC, 2, 3`
+	sqliteUnusedByJobSQL = `
+        SELECT j.job, '' AS service, '' AS source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(COALESCE(j.series, k.series)), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN COALESCE(j.series, k.series) ELSE 0 END), 0)
+        FROM metrics_job_index j
+        JOIN metrics_catalog c ON c.name = j.name
+        JOIN metrics_usage_summary s ON s.name = j.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
+        WHERE c.last_synced_at >= ?
+          AND (? = '' OR j.job = ?)
+        GROUP BY j.job
+        ORDER BY 5 DESC, 1`
+	sqliteUnusedBySourceSQL = `
+        SELECT '' AS job, '' AS service, src.source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+        FROM metrics_catalog_sources src
+        JOIN metrics_catalog c ON c.name = src.name
+        JOIN metrics_usage_summary s ON s.name = src.name
+        LEFT JOIN metrics_cardinality k ON k.name = src.name AND k.source = src.source
+        WHERE c.last_synced_at >= ?
+          AND (? = '' OR src.source = ?)
+        GROUP BY src.source
+        ORDER BY 5 DESC, 3`
+	sqliteUnusedByJobSourceSQL = `
+        SELECT j.job, '' AS service, src.source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+        FROM metrics_job_index j
+        JOIN metrics_catalog_sources src ON src.name = j.name
+        JOIN metrics_catalog c ON c.name = j.name
+        JOIN metrics_usage_summary s ON s.name = j.name
+        LEFT JOIN metrics_cardinality k ON k.name = src.name AND k.source = src.source
+        WHERE c.last_synced_at >= ?
+          AND (? = '' OR j.job = ?)
+          AND (? = '' OR src.source = ?)
+        GROUP BY j.job, src.source
+        ORDER BY 5 DESC, 1, 3`
 	sqliteUnusedByServiceSQL = `
         SELECT '' AS job, svc.service, '' AS source, COUNT(*),
-               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END)
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
         FROM (SELECT DISTINCT name, service FROM metrics_service_index) svc
         JOIN metrics_catalog c ON c.name = svc.name
         JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
         WHERE c.last_synced_at >= ?
           AND (? = '' OR svc.service = ?)
         GROUP BY svc.service
         ORDER BY 5 DESC, 2`
 	sqliteUnusedByServiceSourceSQL = `
         SELECT '' AS job, svc.service, src.source, COUNT(*),
-               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END)
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
         FROM (SELECT DISTINCT name, service FROM metrics_service_index) svc
         JOIN metrics_catalog_sources src ON src.name = svc.name
         JOIN metrics_catalog c ON c.name = svc.name
         JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN metrics_cardinality k ON k.name = src.name AND k.source = src.source
         WHERE c.last_synced_at >= ?
           AND (? = '' OR svc.service = ?)
           AND (? = '' OR src.source = ?)
         GROUP BY svc.service, src.source
         ORDER BY 5 DESC, 2, 3`
+	// Services within jobs: metrics_service_index keeps the job each service
+	// was seen under.
+	pgUnusedByJobServiceSQL = `
+        SELECT svc.job, svc.service, '' AS source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+        FROM metrics_service_index svc
+        JOIN metrics_catalog c ON c.name = svc.name
+        JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
+        WHERE c.last_synced_at >= $1
+          AND ($2 = '' OR svc.job = $2)
+          AND ($3 = '' OR svc.service = $3)
+        GROUP BY svc.job, svc.service
+        ORDER BY 5 DESC, 1, 2`
+	pgUnusedByJobServiceSourceSQL = `
+        SELECT svc.job, svc.service, src.source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+        FROM metrics_service_index svc
+        JOIN metrics_catalog_sources src ON src.name = svc.name
+        JOIN metrics_catalog c ON c.name = svc.name
+        JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN metrics_cardinality k ON k.name = src.name AND k.source = src.source
+        WHERE c.last_synced_at >= $1
+          AND ($2 = '' OR svc.job = $2)
+          AND ($3 = '' OR svc.service = $3)
+          AND ($4 = '' OR src.source = $4)
+        GROUP BY svc.job, svc.service, src.source
+        ORDER BY 5 DESC, 1, 2, 3`
+	sqliteUnusedByJobServiceSQL = `
+        SELECT svc.job, svc.service, '' AS source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+        FROM metrics_service_index svc
+        JOIN metrics_catalog c ON c.name = svc.name
+        JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN (` + metricSeriesSQL + `) k ON k.name = c.name
+        WHERE c.last_synced_at >= ?
+          AND (? = '' OR svc.job = ?)
+          AND (? = '' OR svc.service = ?)
+        GROUP BY svc.job, svc.service
+        ORDER BY 5 DESC, 1, 2`
+	sqliteUnusedByJobServiceSourceSQL = `
+        SELECT svc.job, svc.service, src.source, COUNT(*),
+               SUM(CASE WHEN s.is_unused THEN 1 ELSE 0 END),
+               COALESCE(SUM(k.series), 0),
+               COALESCE(SUM(CASE WHEN s.is_unused THEN k.series ELSE 0 END), 0)
+        FROM metrics_service_index svc
+        JOIN metrics_catalog_sources src ON src.name = svc.name
+        JOIN metrics_catalog c ON c.name = svc.name
+        JOIN metrics_usage_summary s ON s.name = svc.name
+        LEFT JOIN metrics_cardinality k ON k.name = src.name AND k.source = src.source
+        WHERE c.last_synced_at >= ?
+          AND (? = '' OR svc.job = ?)
+          AND (? = '' OR svc.service = ?)
+          AND (? = '' OR src.source = ?)
+        GROUP BY svc.job, svc.service, src.source
+        ORDER BY 5 DESC, 1, 2, 3`
 )
 
 func (p *PostGreSQLProvider) AnalyzeUnusedMetrics(ctx context.Context, params UnusedAnalysisParams) ([]UnusedAnalysisRow, error) {
@@ -140,6 +248,10 @@ func (p *PostGreSQLProvider) AnalyzeUnusedMetrics(ctx context.Context, params Un
 		return queryUnusedAnalysis(ctx, p.db, pgUnusedByServiceSQL, since, params.Service)
 	case UnusedAnalysisByServiceSource:
 		return queryUnusedAnalysis(ctx, p.db, pgUnusedByServiceSourceSQL, since, params.Service, params.Source)
+	case UnusedAnalysisByJobService:
+		return queryUnusedAnalysis(ctx, p.db, pgUnusedByJobServiceSQL, since, params.Job, params.Service)
+	case UnusedAnalysisByJobServiceSource:
+		return queryUnusedAnalysis(ctx, p.db, pgUnusedByJobServiceSourceSQL, since, params.Job, params.Service, params.Source)
 	}
 	return nil, fmt.Errorf("unknown grouping %q", params.GroupBy)
 }
@@ -157,6 +269,10 @@ func (p *SQLiteProvider) AnalyzeUnusedMetrics(ctx context.Context, params Unused
 		return queryUnusedAnalysis(ctx, p.db, sqliteUnusedByServiceSQL, since, params.Service, params.Service)
 	case UnusedAnalysisByServiceSource:
 		return queryUnusedAnalysis(ctx, p.db, sqliteUnusedByServiceSourceSQL, since, params.Service, params.Service, params.Source, params.Source)
+	case UnusedAnalysisByJobService:
+		return queryUnusedAnalysis(ctx, p.db, sqliteUnusedByJobServiceSQL, since, params.Job, params.Job, params.Service, params.Service)
+	case UnusedAnalysisByJobServiceSource:
+		return queryUnusedAnalysis(ctx, p.db, sqliteUnusedByJobServiceSourceSQL, since, params.Job, params.Job, params.Service, params.Service, params.Source, params.Source)
 	}
 	return nil, fmt.Errorf("unknown grouping %q", params.GroupBy)
 }
@@ -168,7 +284,7 @@ func queryUnusedAnalysis(ctx context.Context, db *sql.DB, query string, args ...
 	}
 	return ScanRows(rows, func(r *sql.Rows) (UnusedAnalysisRow, error) {
 		var row UnusedAnalysisRow
-		err := r.Scan(&row.Job, &row.Service, &row.Source, &row.Total, &row.Unused)
+		err := r.Scan(&row.Job, &row.Service, &row.Source, &row.Total, &row.Unused, &row.Series, &row.UnusedSeries)
 		return row, err
 	})
 }

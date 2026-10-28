@@ -221,6 +221,11 @@ definitions:
     properties:
       job:
         type: string
+      series:
+        description: |-
+          Series and UnusedSeries are the group's head series, all and of its
+          unused metrics (see metrics_cardinality).
+        type: integer
       service:
         type: string
       source:
@@ -228,6 +233,8 @@ definitions:
       total:
         type: integer
       unused:
+        type: integer
+      unusedSeries:
         type: integer
     type: object
   models.Data:
@@ -278,6 +285,13 @@ definitions:
         type: integer
       recordCount:
         type: integer
+      series:
+        additionalProperties:
+          type: integer
+        description: |-
+          Series is the metric's head series per metadata source, for the
+          sources whose recorded top-N (inventory.cardinality_limit) it is in.
+        type: object
       sources:
         description: |-
           Sources are the inventory.metadata_sources that report this metric,
@@ -491,7 +505,8 @@ paths:
         per metadata source, or per job and source. Metrics not synced within the
         inventory time window are left out.
       parameters:
-      - description: job (default), service, source, job,source or service,source
+      - description: Any of job, service, source, in that order, comma separated
+          (default job)
         in: query
         name: groupBy
         type: string

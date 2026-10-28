@@ -1057,9 +1057,10 @@ func (p *SQLiteProvider) UpsertMetricsJobIndex(ctx context.Context, items []Metr
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO metrics_job_index(name, job, updated_at)
-		VALUES(?, ?, datetime('now'))
+		INSERT INTO metrics_job_index(name, job, series, updated_at)
+		VALUES(?, ?, ?, datetime('now'))
 		ON CONFLICT(name, job) DO UPDATE SET
+			series = excluded.series,
 			updated_at = excluded.updated_at
 	`)
 	if err != nil {
@@ -1068,7 +1069,7 @@ func (p *SQLiteProvider) UpsertMetricsJobIndex(ctx context.Context, items []Metr
 	}
 	defer CloseResource(stmt)
 	for _, it := range items {
-		if _, err := stmt.ExecContext(ctx, it.Name, it.Job); err != nil {
+		if _, err := stmt.ExecContext(ctx, it.Name, it.Job, nullSeries(it.Series)); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("exec: %w", err)
 		}
@@ -1120,6 +1121,78 @@ func (p *SQLiteProvider) UpsertMetricsCatalogSources(ctx context.Context, source
 	return nil
 }
 
+func (p *SQLiteProvider) ReplaceMetricsCardinality(ctx context.Context, source string, series map[string]int, refreshBefore time.Time) error {
+	names, counts := cardinalityArrays(series)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	namesJSON, err := json.Marshal(names)
+	if err != nil {
+		return fmt.Errorf("marshal names: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+        DELETE FROM metrics_cardinality
+        WHERE source = ? AND name NOT IN (SELECT value FROM json_each(?))
+    `, source, string(namesJSON)); err != nil {
+		return fmt.Errorf("drop stale cardinality: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+        INSERT INTO metrics_cardinality(name, source, series, updated_at)
+        SELECT ?1, ?2, ?3, datetime('now')
+        WHERE NOT EXISTS (
+            SELECT 1 FROM metrics_cardinality
+            WHERE name = ?1 AND source = ?2 AND updated_at >= ?4
+              AND abs(series - ?3) * 10 <= series
+        )
+        ON CONFLICT(name, source) DO UPDATE SET
+            series = excluded.series,
+            updated_at = excluded.updated_at
+    `)
+	if err != nil {
+		return fmt.Errorf("prepare: %w", err)
+	}
+	defer CloseResource(stmt)
+	refresh := refreshBefore.UTC().Format(SQLiteTimeFormat)
+	for i, name := range names {
+		if _, err := stmt.ExecContext(ctx, name, source, counts[i], refresh); err != nil {
+			return fmt.Errorf("upsert cardinality: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (p *SQLiteProvider) GetMetricsCardinality(ctx context.Context, names []string) (map[string]map[string]int, error) {
+	if len(names) == 0 {
+		return map[string]map[string]int{}, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
+	args := make([]any, 0, 2*len(names)+1)
+	for _, n := range names {
+		args = append(args, n)
+	}
+	args = append(args, UpstreamSeriesSource)
+	for _, n := range names {
+		args = append(args, n)
+	}
+	rows, err := ExecuteQuery(ctx, p.db, `
+        SELECT name, source, series FROM metrics_cardinality
+        WHERE name IN (`+placeholders+`)
+        UNION ALL
+        SELECT j.name, ?, SUM(j.series) FROM metrics_job_index j
+        WHERE j.name IN (`+placeholders+`) AND j.series IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM metrics_cardinality k WHERE k.name = j.name)
+        GROUP BY j.name
+    `, args...)
+	if err != nil {
+		return nil, err
+	}
+	return groupCardinality(rows)
+}
+
 func (p *SQLiteProvider) DeleteMetricsCatalogSourcesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -1158,7 +1231,7 @@ func (p *SQLiteProvider) ListMetricsCatalogSources(ctx context.Context) ([]strin
 	return ScanRows(rows, scanJob)
 }
 
-func (p *SQLiteProvider) UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem) error {
+func (p *SQLiteProvider) UpsertMetricsServiceIndex(ctx context.Context, items []MetricServiceIndexItem, refreshBefore time.Time) error {
 	items = sortedUniqueServiceItems(items)
 	if len(items) == 0 {
 		return nil
@@ -1171,7 +1244,11 @@ func (p *SQLiteProvider) UpsertMetricsServiceIndex(ctx context.Context, items []
 	}
 	stmt, err := tx.PrepareContext(ctx, `
         INSERT INTO metrics_service_index(name, service, job, updated_at)
-        VALUES (?, ?, ?, datetime('now'))
+        SELECT ?1, ?2, ?3, datetime('now')
+        WHERE NOT EXISTS (
+            SELECT 1 FROM metrics_service_index
+            WHERE name = ?1 AND service = ?2 AND job = ?3 AND updated_at >= ?4
+        )
         ON CONFLICT(name, service, job) DO UPDATE SET
             updated_at = excluded.updated_at
     `)
@@ -1180,8 +1257,9 @@ func (p *SQLiteProvider) UpsertMetricsServiceIndex(ctx context.Context, items []
 		return fmt.Errorf("prepare: %w", err)
 	}
 	defer CloseResource(stmt)
+	refresh := refreshBefore.UTC().Format(SQLiteTimeFormat)
 	for _, it := range items {
-		if _, err := stmt.ExecContext(ctx, it.Name, it.Service, it.Job); err != nil {
+		if _, err := stmt.ExecContext(ctx, it.Name, it.Service, it.Job, refresh); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("exec: %w", err)
 		}

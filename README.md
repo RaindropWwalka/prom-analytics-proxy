@@ -527,6 +527,11 @@ inventory:
                              # metadata_step_timeout alone (default: 1m)
   metadata_source_refresh_interval: 24h # How long a "source reports metric" record stands
                              # before it is rewritten (default: 24h)
+  cardinality_limit: 1000    # Record each metadata source's N largest metrics by head series,
+                             # from /api/v1/status/tsdb (default: 1000; 0 = off; at most 10000)
+  cardinality_cover_metadata: false # Ask each source for as many metrics as it reported to the
+                             # catalog (at least cardinality_limit, at most 10000), so every
+                             # metric gets a count
   sync_interval: 10m         # How often to sync inventory (default: 10m)
   time_window: 720h          # Time window for usage analysis (default: 30 days)
   run_timeout: 300s          # Timeout for an entire sync run (default: 300s)
@@ -539,6 +544,8 @@ inventory:
                              # Needed for the job filter and the unused-metrics analysis by job.
   service_label: service     # Also index which service of each job produces each metric,
                              # from the same per-job query (default: service; "" = jobs only)
+  service_index_refresh_interval: 24h # Rewrite a known (metric, service, job) record only
+                             # once it's this old; new ones are written at once (default: 24h)
                              # When true, job_index_timeout counts toward run_timeout's minimum.
   job_index_timeout: 210s    # Timeout for the job index step as a whole (default: 210s)
   job_index_label_timeout: 30s   # Timeout for job label fetch (default: 30s)

@@ -989,10 +989,10 @@ func (r *routes) seriesMetadata(w http.ResponseWriter, req *http.Request) {
 }
 
 // attachSources fills in which metadata sources report each metric on a
-// page. Looked up for the page's names only, in one query, rather than
-// joined into every series-metadata query shape. A failure leaves the page
-// without sources instead of failing it: they're detail on the page, not
-// what was asked for.
+// page, and how many series each holds. Looked up for the page's names only,
+// one query each, rather than joined into every series-metadata query
+// shape. A failure leaves the page without them instead of failing it:
+// they're detail on the page, not what was asked for.
 func (r *routes) attachSources(ctx context.Context, page []models.MetricMetadata) {
 	if len(page) == 0 {
 		return
@@ -1008,6 +1008,14 @@ func (r *routes) attachSources(ctx context.Context, page []models.MetricMetadata
 	}
 	for i := range page {
 		page[i].Sources = sources[page[i].Name]
+	}
+	series, err := r.dbProvider.GetMetricsCardinality(ctx, names)
+	if err != nil {
+		slog.Warn("unable to retrieve metric cardinality; returning series metadata without it", "err", err)
+		return
+	}
+	for i := range page {
+		page[i].Series = series[page[i].Name]
 	}
 }
 
@@ -1541,7 +1549,7 @@ func (r *routes) listServices(w http.ResponseWriter, req *http.Request) {
 // @Description Count the catalog's metrics and how many are unused, per job, per metadata source, or per job and source. Metrics not synced within the inventory time window are left out.
 // @Tags metrics
 // @Produce json
-// @Param groupBy query string false "job (default), service, source, job,source or service,source"
+// @Param groupBy query string false "Any of job, service, source, in that order, comma separated (default job)"
 // @Param job query string false "Keep only this job"
 // @Param service query string false "Keep only this service"
 // @Param source query string false "Keep only this source"
@@ -1556,9 +1564,10 @@ func (r *routes) analyzeUnused(w http.ResponseWriter, req *http.Request) {
 	}
 	switch groupBy {
 	case db.UnusedAnalysisByJob, db.UnusedAnalysisBySource, db.UnusedAnalysisByJobSource,
-		db.UnusedAnalysisByService, db.UnusedAnalysisByServiceSource:
+		db.UnusedAnalysisByService, db.UnusedAnalysisByServiceSource,
+		db.UnusedAnalysisByJobService, db.UnusedAnalysisByJobServiceSource:
 	default:
-		writeErrorResponse(req, w, fmt.Errorf("groupBy must be job, service, source, job,source or service,source (got %q)", groupBy), http.StatusBadRequest)
+		writeErrorResponse(req, w, fmt.Errorf("groupBy must list job, service and/or source, in that order, comma separated (got %q)", groupBy), http.StatusBadRequest)
 		return
 	}
 	window := config.DefaultConfig.Inventory.TimeWindow

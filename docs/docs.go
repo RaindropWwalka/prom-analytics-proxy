@@ -36,7 +36,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "job (default), service, source, job,source or service,source",
+                        "description": "Any of job, service, source, in that order, comma separated (default job)",
                         "name": "groupBy",
                         "in": "query"
                     },
@@ -1794,6 +1794,10 @@ const docTemplate = `{
                 "job": {
                     "type": "string"
                 },
+                "series": {
+                    "description": "Series and UnusedSeries are the group's head series, all and of its\nunused metrics (see metrics_cardinality).",
+                    "type": "integer"
+                },
                 "service": {
                     "type": "string"
                 },
@@ -1804,6 +1808,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "unused": {
+                    "type": "integer"
+                },
+                "unusedSeries": {
                     "type": "integer"
                 }
             }
@@ -1871,6 +1878,13 @@ const docTemplate = `{
                 },
                 "recordCount": {
                     "type": "integer"
+                },
+                "series": {
+                    "description": "Series is the metric's head series per metadata source, for the\nsources whose recorded top-N (inventory.cardinality_limit) it is in.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
                 },
                 "sources": {
                     "description": "Sources are the inventory.metadata_sources that report this metric,\nsorted. Empty when the catalog is read from the upstream.",
