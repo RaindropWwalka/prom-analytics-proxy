@@ -478,6 +478,24 @@
                         "description": "Query type filter (instant or range)",
                         "name": "type",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Status filter (2xx, 4xx, 5xx or error)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Origin filter (alert, dashboard or other)",
+                        "name": "origin",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Match any stored header name or value",
+                        "name": "headerSearch",
+                        "in": "query"
                     }
                 ],
                 "responses": {

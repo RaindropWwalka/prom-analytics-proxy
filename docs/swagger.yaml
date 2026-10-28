@@ -758,6 +758,18 @@ paths:
         in: query
         name: type
         type: string
+      - description: Status filter (2xx, 4xx, 5xx or error)
+        in: query
+        name: status
+        type: string
+      - description: Origin filter (alert, dashboard or other)
+        in: query
+        name: origin
+        type: string
+      - description: Match any stored header name or value
+        in: query
+        name: headerSearch
+        type: string
       produces:
       - application/json
       responses:

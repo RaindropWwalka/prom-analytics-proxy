@@ -819,6 +819,9 @@ func (r *routes) queryExpressions(w http.ResponseWriter, req *http.Request) {
 // @Param sortBy query string false "Sort field"
 // @Param sortOrder query string false "Sort order (asc or desc)"
 // @Param type query string false "Query type filter (instant or range)"
+// @Param status query string false "Status filter (2xx, 4xx, 5xx or error)"
+// @Param origin query string false "Origin filter (alert, dashboard or other)"
+// @Param headerSearch query string false "Match any stored header name or value"
 // @Success 200 {object} QueryExecutionsResponse
 // @Failure 400 {object} models.ErrorResponse
 // @Failure 500 {object} models.ErrorResponse
@@ -844,14 +847,31 @@ func (r *routes) queryExecutions(w http.ResponseWriter, req *http.Request) {
 		typ = ""
 	}
 
+	// Unknown values filter nothing, like an unknown type does.
+	status := req.FormValue("status")
+	switch status {
+	case db.ExecutionStatus2xx, db.ExecutionStatus4xx, db.ExecutionStatus5xx, db.ExecutionStatusError:
+	default:
+		status = ""
+	}
+	origin := req.FormValue("origin")
+	switch origin {
+	case db.ExecutionOriginAlert, db.ExecutionOriginDashboard, db.ExecutionOriginOther:
+	default:
+		origin = ""
+	}
+
 	params := db.QueryExecutionsParams{
-		Fingerprint: fingerprint,
-		TimeRange:   tr,
-		Page:        page,
-		PageSize:    pageSize,
-		SortBy:      sortBy,
-		SortOrder:   sortOrder,
-		Type:        typ,
+		Fingerprint:  fingerprint,
+		TimeRange:    tr,
+		Page:         page,
+		PageSize:     pageSize,
+		SortBy:       sortBy,
+		SortOrder:    sortOrder,
+		Type:         typ,
+		Status:       status,
+		Origin:       origin,
+		HeaderSearch: strings.TrimSpace(req.FormValue("headerSearch")),
 	}
 	data, err := r.dbProvider.GetQueryExecutions(req.Context(), params)
 	if err != nil {

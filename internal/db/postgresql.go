@@ -1751,6 +1751,17 @@ func (p *PostGreSQLProvider) GetQueryExecutions(ctx context.Context, params Quer
             WHERE ts BETWEEN $1 AND $2
               AND fingerprint = $3
               AND ($4 = '' OR type = $4)
+              AND ($5 = ''
+                   OR ($5 = '2xx' AND statusCode BETWEEN 200 AND 299)
+                   OR ($5 = '4xx' AND statusCode BETWEEN 400 AND 499)
+                   OR ($5 = '5xx' AND statusCode >= 500)
+                   OR ($5 = 'error' AND (statusCode < 200 OR statusCode >= 300)))
+              AND ($6 = ''
+                   OR ($6 = 'alert' AND httpHeaders->>'fromalert' = 'true')
+                   OR ($6 = 'dashboard' AND httpHeaders ? 'x-dashboard-uid'
+                       AND COALESCE(httpHeaders->>'fromalert', '') <> 'true')
+                   OR ($6 = 'other' AND NOT (COALESCE(httpHeaders, '{}'::jsonb) ?| ARRAY['x-dashboard-uid', 'fromalert'])))
+              AND ($7 = '' OR httpHeaders::text ILIKE '%' || $7 || '%')
         ), counted AS (
             SELECT COUNT(*) AS total_count FROM filtered
         )
@@ -1761,10 +1772,11 @@ func (p *PostGreSQLProvider) GetQueryExecutions(ctx context.Context, params Quer
     `
 
 	orderClause := fmt.Sprintf(" ORDER BY %s %s NULLS LAST", params.SortBy, strings.ToUpper(params.SortOrder))
-	query := base + orderClause + " LIMIT $5 OFFSET $6;"
+	query := base + orderClause + " LIMIT $8 OFFSET $9;"
 
 	offset := (params.Page - 1) * params.PageSize
-	rows, err := ExecuteQuery(ctx, p.db, query, from, to, params.Fingerprint, params.Type, params.PageSize, offset)
+	rows, err := ExecuteQuery(ctx, p.db, query, from, to, params.Fingerprint, params.Type,
+		params.Status, params.Origin, params.HeaderSearch, params.PageSize, offset)
 	if err != nil {
 		return PagedResult{}, err
 	}
